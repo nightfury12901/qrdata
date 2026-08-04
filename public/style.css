@@ -107,16 +107,17 @@ body {
   position: absolute;
   top: 10px;
   left: 10px;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(6px);
-  padding: 10px 16px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  padding: 8px 12px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 11px;
   font-family: 'Consolas', 'Courier New', monospace;
-  line-height: 1.6;
+  line-height: 1.4;
   z-index: 20;
-  max-width: 340px;
+  max-width: 260px;
   border: 1px solid rgba(255,255,255,0.1);
+  pointer-events: none;
 }
 
 .stats-panel .label {

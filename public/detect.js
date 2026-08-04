@@ -204,9 +204,9 @@ function filterAnchors(blobs, frameW, frameH) {
     const { w, h } = b.bbox;
     // Size check
     if (w < minSide || h < minSide || w > maxSide || h > maxSide) return false;
-    // Roughly square (aspect ratio between 0.5 and 2.0)
+    // Roughly square (aspect ratio between 0.33 and 3.0 to allow for perspective)
     const aspect = w / h;
-    if (aspect < 0.5 || aspect > 2.0) return false;
+    if (aspect < 0.33 || aspect > 3.0) return false;
     // Minimum area (reject tiny noise)
     if (b.area < minSide * minSide * 0.3) return false;
     return true;

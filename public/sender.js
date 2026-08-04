@@ -28,14 +28,14 @@
 
 // ---- Layout constants (unit coordinates) ----
 const GRID_SIZE = 16;
-const TOTAL_UNITS = 24;
-const GRID_ORIGIN = { x: 4, y: 4 }; // top-left corner of the 16×16 data grid
+const TOTAL_UNITS = 26;
+const GRID_ORIGIN = { x: 5, y: 5 }; // top-left corner of the 16×16 data grid
 
 const ANCHORS = [
   { x: 1, y: 1,  hollow: false }, // TL
-  { x: 21, y: 1, hollow: false }, // TR
-  { x: 1, y: 21, hollow: false }, // BL
-  { x: 21, y: 21, hollow: true }, // BR — orientation marker
+  { x: 23, y: 1, hollow: false }, // TR
+  { x: 1, y: 23, hollow: false }, // BL
+  { x: 23, y: 23, hollow: true }, // BR — orientation marker
 ];
 const ANCHOR_SIZE = 2; // units
 

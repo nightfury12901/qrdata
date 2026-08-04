@@ -11,16 +11,16 @@
 
 // ---- Layout constants (must match sender.js) ----
 const GRID_SIZE = 16;
-const TOTAL_UNITS = 24;
-const GRID_ORIGIN_X = 4;
-const GRID_ORIGIN_Y = 4;
+const TOTAL_UNITS = 26;
+const GRID_ORIGIN_X = 5;
+const GRID_ORIGIN_Y = 5;
 
 // Ideal anchor centers in unit coordinates
 const IDEAL_ANCHORS = {
   TL: [2, 2],
-  TR: [22, 2],
-  BL: [2, 22],
-  BR: [22, 22],
+  TR: [24, 2],
+  BL: [2, 24],
+  BR: [24, 24],
 };
 
 // Ideal cell centers
@@ -300,8 +300,8 @@ function decodeLoop() {
   }
 
   statAnchors.textContent = anchors
-    ? `4 found ✓`
-    : `${candidates.length} of ${blobs.length} blobs`;
+    ? `4/4 found ✓`
+    : `Found ${candidates.length}/4 (Frame entire grid!)`;
   statAnchors.className = anchors ? 'value' : 'value warn';
   statPxCell.textContent = stats.lastPixelsPerCellNative > 0
     ? stats.lastPixelsPerCellNative.toFixed(1)
@@ -331,7 +331,19 @@ function drawOverlay(anchors, cells) {
 
   overlayCtx.clearRect(0, 0, w, h);
 
-  if (!anchors) return;
+  if (!anchors) {
+    // Draw a gentle framing guide when searching
+    overlayCtx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    overlayCtx.lineWidth = 2;
+    const guideSize = Math.min(w, h) * 0.7;
+    overlayCtx.strokeRect((w - guideSize) / 2, (h - guideSize) / 2, guideSize, guideSize);
+    
+    overlayCtx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    overlayCtx.font = '14px sans-serif';
+    overlayCtx.textAlign = 'center';
+    overlayCtx.fillText('Point at the entire grid', w / 2, (h - guideSize) / 2 - 10);
+    return;
+  }
 
   // Scale from processing coords to overlay coords
   const sx = w / procW;
