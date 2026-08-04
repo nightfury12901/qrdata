@@ -225,11 +225,39 @@ function filterAnchors(blobs, frameW, frameH) {
 function identifyAnchors(candidates) {
   if (candidates.length < 4) return null;
 
-  // Strategy: pick the 4 candidates whose bounding-box centers form the
-  // largest-area quadrilateral (most likely the outer anchors, not grid cells).
-  // Sort by area descending and take top candidates to limit combinations.
-  const sorted = candidates.slice().sort((a, b) => b.area - a.area);
-  const pool = sorted.slice(0, Math.min(sorted.length, 12));
+  // Strategy: The 4 true anchors form the outermost corners of the pattern.
+  // Geometrically, they must lie on the convex hull of all blob candidates!
+  // By finding the convex hull first, we eliminate all interior grid data blobs
+  // instantly, reducing combinations drastically and guaranteeing we don't
+  // accidentally discard true anchors just because they are smaller than data blobs.
+  
+  candidates.sort((a, b) => a.cx !== b.cx ? a.cx - b.cx : a.cy - b.cy);
+  
+  const cross = (o, a, b) => (a.cx - o.cx) * (b.cy - o.cy) - (a.cy - o.cy) * (b.cx - o.cx);
+  
+  const lower = [];
+  for (let i = 0; i < candidates.length; i++) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], candidates[i]) <= 0) {
+      lower.pop();
+    }
+    lower.push(candidates[i]);
+  }
+  
+  const upper = [];
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], candidates[i]) <= 0) {
+      upper.pop();
+    }
+    upper.push(candidates[i]);
+  }
+  
+  upper.pop();
+  lower.pop();
+  
+  // The pool is now strictly the extreme outer blobs (usually 4 to 8 points)
+  const pool = lower.concat(upper);
+  // Just in case a weird geometry causes fewer than 4 points on the hull
+  if (pool.length < 4) return null;
 
   let bestQuad = null;
   let bestArea = 0;
