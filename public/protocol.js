@@ -35,6 +35,11 @@ function encodeFrame(seq, isEof, payload) {
   
   const frame = new Uint8Array(FRAME_SIZE_BYTES);
   
+  // Fill the frame with a checkerboard pattern (01010101 = 0x55)
+  // This ensures unused padding bytes don't create massive solid black areas
+  // which could merge with anchors in the camera's binarized image.
+  frame.fill(0x55);
+  
   // Seq (15 bits) + EOF flag (MSB)
   const seqWithEof = (seq & 0x7FFF) | (isEof ? 0x8000 : 0);
   frame[0] = seqWithEof & 0xFF;        // LSB
