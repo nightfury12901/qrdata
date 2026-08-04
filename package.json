@@ -1,0 +1,10 @@
+{
+  "name": "photon",
+  "version": "0.1.0",
+  "description": "Universal Offline Optical Communication Protocol",
+  "private": true,
+  "scripts": {
+    "generate-cert": "node generate-cert.js",
+    "start": "node server.js"
+  }
+}

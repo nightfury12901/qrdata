@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Photon — Receiver</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="receiver-page">
+  <!-- Landscape-only prompt -->
+  <div class="rotate-prompt">
+    <div class="icon">📱↻</div>
+    <div>Rotate your phone to <strong>landscape</strong></div>
+  </div>
+
+  <!-- Camera feed -->
+  <video id="cameraVideo" autoplay playsinline muted></video>
+
+  <!-- Debug overlay -->
+  <canvas id="overlayCanvas"></canvas>
+
+  <!-- Stats panel -->
+  <div class="stats-panel" id="statsPanel">
+    <div><span class="label">Status: </span><span class="value" id="statStatus">Initializing…</span></div>
+    <div><span class="label">Decode FPS: </span><span class="value" id="statFPS">—</span></div>
+    <div><span class="label">Success rate: </span><span class="value" id="statRate">—</span></div>
+    <div><span class="label">Throughput: </span><span class="value" id="statThroughput">—</span></div>
+    <div><span class="label">Progress: </span><span class="value" id="statProgress">—</span></div>
+    <div><span class="label">Anchors: </span><span class="value" id="statAnchors">—</span></div>
+    <div><span class="label">px/cell: </span><span class="value" id="statPxCell">—</span></div>
+    <div style="margin-top:8px;">
+      <div class="label" style="margin-bottom:4px;">Reassembled Message:</div>
+      <textarea id="statMessage" readonly rows="3" style="width:100%; background:#000; color:#0f0; border:1px solid #333; padding:4px; font-family:monospace; resize:none;">Waiting for frames...</textarea>
+    </div>
+  </div>
+
+  <!-- Load modules (order matters: detect and homography before receiver) -->
+  <script src="protocol.js"></script>
+  <script src="detect.js"></script>
+  <script src="homography.js"></script>
+  <script src="receiver.js"></script>
+</body>
+</html>

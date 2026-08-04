@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Photon — Sender</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="sender-page">
+  <div class="sender-controls">
+    <textarea id="msgInput" placeholder="Enter message to send... (e.g. Hello from Photon Phase 2!)" rows="2" style="width:300px; background:#1a1a2e; color:#0f0; border:1px solid #333; padding:4px; font-family:monospace; border-radius:4px; resize:none;"></textarea>
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <button class="btn" id="btnStart">Start TX</button>
+      <button class="btn" id="btnStop" disabled>Stop</button>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:4px; font-size:12px; color:#aaa; min-width:120px;">
+      <span id="txStatus">Idle</span>
+      <span id="txFrame">—</span>
+    </div>
+  </div>
+  <canvas id="gridCanvas"></canvas>
+  <script src="protocol.js"></script>
+  <script src="sender.js"></script>
+</body>
+</html>

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Photon — Optical Data Transfer</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .index-page {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      gap: 24px;
+      text-align: center;
+    }
+    .index-page h1 {
+      font-size: 32px;
+      font-weight: 300;
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      color: #0f0;
+    }
+    .index-page .subtitle {
+      color: #777;
+      font-size: 14px;
+      margin-top: -12px;
+    }
+    .nav-links {
+      display: flex;
+      gap: 20px;
+      margin-top: 20px;
+    }
+    .nav-links a {
+      padding: 16px 36px;
+      border: 1px solid #444;
+      border-radius: 8px;
+      color: #eee;
+      text-decoration: none;
+      font-size: 16px;
+      transition: all 0.15s;
+    }
+    .nav-links a:hover {
+      background: #222;
+      border-color: #0f0;
+      color: #0f0;
+    }
+    .phase-tag {
+      display: inline-block;
+      padding: 3px 10px;
+      background: rgba(0,255,0,0.1);
+      border: 1px solid rgba(0,255,0,0.3);
+      border-radius: 12px;
+      font-size: 12px;
+      color: #0f0;
+      letter-spacing: 1px;
+    }
+  </style>
+</head>
+<body>
+  <div class="index-page">
+    <h1>⚡ Photon</h1>
+    <p class="subtitle">Universal Offline Optical Communication Protocol</p>
+    <span class="phase-tag">Phase 1 — Camera-to-Screen Link</span>
+    <div class="nav-links">
+      <a href="/sender.html">📺 Sender<br><small style="color:#888">Open on laptop</small></a>
+      <a href="/receiver.html">📱 Receiver<br><small style="color:#888">Open on phone</small></a>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,170 @@
+/* ============================================================
+   Photon — Phase 1 Shared Styles
+   ============================================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #111;
+  color: #eee;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ---- Sender ---- */
+
+.sender-page {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  background: #fff;
+  overflow: hidden;
+}
+
+#gridCanvas {
+  display: block;
+}
+
+.sender-controls {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 14px;
+  z-index: 10;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(6px);
+  padding: 6px 16px;
+  border-radius: 8px;
+}
+
+.sender-controls .hex {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 18px;
+  letter-spacing: 2px;
+  color: #0f0;
+  background: #1a1a2e;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid #333;
+}
+
+.btn {
+  padding: 8px 18px;
+  border: 1px solid #555;
+  border-radius: 6px;
+  background: #222;
+  color: #eee;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn:hover {
+  background: #333;
+  border-color: #888;
+}
+.btn:active {
+  background: #444;
+}
+
+/* ---- Receiver ---- */
+
+.receiver-page {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#cameraVideo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#overlayCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.stats-panel {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  line-height: 1.6;
+  z-index: 20;
+  max-width: 340px;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.stats-panel .label {
+  color: #888;
+}
+.stats-panel .value {
+  color: #0f0;
+}
+.stats-panel .value.error {
+  color: #f44;
+}
+.stats-panel .value.warn {
+  color: #fa0;
+}
+
+.decoded-hex {
+  font-size: 16px;
+  letter-spacing: 2px;
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: rgba(0,255,0,0.08);
+  border-radius: 4px;
+}
+
+/* ---- Rotate prompt (portrait fallback) ---- */
+
+.rotate-prompt {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: #111;
+  color: #ccc;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  font-size: 18px;
+  z-index: 1000;
+}
+.rotate-prompt .icon {
+  font-size: 48px;
+}
+
+@media (orientation: portrait) {
+  .receiver-page > :not(.rotate-prompt) {
+    display: none !important;
+  }
+  .rotate-prompt {
+    display: flex !important;
+  }
+}
