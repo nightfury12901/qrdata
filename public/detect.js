@@ -290,10 +290,10 @@ function identifyAnchors(candidates) {
   }
 
   // Compute pixels-per-unit from anchor distances
-  // TL to TR = 12 units (from x=2 to x=14)
+  // TL to TR = 20 units (from x=2 to x=22)
   const distTR = Math.hypot(tr.cx - tl.cx, tr.cy - tl.cy);
   const distBL = Math.hypot(bl.cx - tl.cx, bl.cy - tl.cy);
-  const pixelsPerUnit = (distTR + distBL) / 24; // average of both 12-unit spans
+  const pixelsPerUnit = (distTR + distBL) / 40; // average of both 20-unit spans
 
   return {
     TL: [tl.cx, tl.cy],
@@ -344,7 +344,7 @@ function identifyByHollow(quad, centroid) {
 
   const distTR = Math.hypot(tr.cx - tl.cx, tr.cy - tl.cy);
   const distBL = Math.hypot(bl.cx - tl.cx, bl.cy - tl.cy);
-  const pixelsPerUnit = (distTR + distBL) / 24;
+  const pixelsPerUnit = (distTR + distBL) / 40;
 
   return {
     TL: [tl.cx, tl.cy],
