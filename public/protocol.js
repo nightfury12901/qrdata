@@ -35,10 +35,12 @@ function encodeFrame(seq, isEof, payload) {
   
   const frame = new Uint8Array(FRAME_SIZE_BYTES);
   
-  // Fill the frame with a checkerboard pattern (01010101 = 0x55)
-  // This ensures unused padding bytes don't create massive solid black areas
-  // which could merge with anchors in the camera's binarized image.
-  frame.fill(0x55);
+  // Fill the frame with random bytes to create high-frequency noise ("static").
+  // This ensures unused padding bytes don't create vertical stripes or massive 
+  // solid areas which merge with anchors in the camera's binarized image.
+  for (let i = 0; i < FRAME_SIZE_BYTES; i++) {
+    frame[i] = Math.floor(Math.random() * 256);
+  }
   
   // Seq (15 bits) + EOF flag (MSB)
   const seqWithEof = (seq & 0x7FFF) | (isEof ? 0x8000 : 0);
