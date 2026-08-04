@@ -55,11 +55,15 @@ function render() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
-  const patternPx = Math.min(canvas.width, canvas.height) * 0.85;
+  // Reserve space for the control panel so it doesn't overlap the top anchors
+  const topReserved = 100;
+  const availHeight = canvas.height - topReserved;
+
+  const patternPx = Math.min(canvas.width, availHeight) * 0.85;
   const unit = patternPx / TOTAL_UNITS;
 
   const ox = (canvas.width - patternPx) / 2;
-  const oy = (canvas.height - patternPx) / 2;
+  const oy = topReserved + (availHeight - patternPx) / 2;
 
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
