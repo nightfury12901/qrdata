@@ -197,7 +197,7 @@ function filterAnchors(blobs, frameW, frameH) {
   // The pattern may fill 20-90% of the frame. So anchor size in pixels
   // is roughly 2.5% to 11% of the frame dimension.
   const frameDim = Math.min(frameW, frameH);
-  const minSide = frameDim * 0.015;  // very generous lower bound
+  const minSide = frameDim * 0.005;  // very generous lower bound (anchors are ~4.7% of pattern)
   const maxSide = frameDim * 0.25;   // generous upper bound
 
   return blobs.filter(b => {
@@ -318,10 +318,10 @@ function identifyAnchors(candidates) {
   }
 
   // Compute pixels-per-unit from anchor distances
-  // TL to TR = 20 units (from x=2 to x=22)
+  // TL to TR = 38 units (from x=2 to x=40)
   const distTR = Math.hypot(tr.cx - tl.cx, tr.cy - tl.cy);
   const distBL = Math.hypot(bl.cx - tl.cx, bl.cy - tl.cy);
-  const pixelsPerUnit = (distTR + distBL) / 40; // average of both 20-unit spans
+  const pixelsPerUnit = (distTR + distBL) / 76; // average of both 38-unit spans
 
   return {
     TL: [tl.cx, tl.cy],
@@ -372,7 +372,7 @@ function identifyByHollow(quad, centroid) {
 
   const distTR = Math.hypot(tr.cx - tl.cx, tr.cy - tl.cy);
   const distBL = Math.hypot(bl.cx - tl.cx, bl.cy - tl.cy);
-  const pixelsPerUnit = (distTR + distBL) / 40;
+  const pixelsPerUnit = (distTR + distBL) / 76;
 
   return {
     TL: [tl.cx, tl.cy],
