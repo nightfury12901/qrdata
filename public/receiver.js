@@ -350,18 +350,34 @@ function drawOverlay(anchors, cells) {
     return;
   }
 
-  // Scale from processing coords to overlay coords
-  const sx = w / procW;
-  const sy = h / procH;
+  // Compute scale and offset to match CSS object-fit: cover
+  const videoAspect = nativeW / nativeH;
+  const screenAspect = w / h;
+  
+  let scale, offX, offY;
+  if (videoAspect > screenAspect) {
+    // Video is wider, scaled by height
+    scale = h / procH;
+    offX = (w - procW * scale) / 2;
+    offY = 0;
+  } else {
+    // Video is taller, scaled by width
+    scale = w / procW;
+    offX = 0;
+    offY = (h - procH * scale) / 2;
+  }
+
+  const toScreenX = (x) => x * scale + offX;
+  const toScreenY = (y) => y * scale + offY;
 
   // Draw quadrilateral connecting anchors
   const pts = [anchors.TL, anchors.TR, anchors.BR, anchors.BL]; // clockwise
   overlayCtx.strokeStyle = 'rgba(0, 255, 0, 0.7)';
   overlayCtx.lineWidth = 2;
   overlayCtx.beginPath();
-  overlayCtx.moveTo(pts[0][0] * sx, pts[0][1] * sy);
+  overlayCtx.moveTo(toScreenX(pts[0][0]), toScreenY(pts[0][1]));
   for (let i = 1; i < 4; i++) {
-    overlayCtx.lineTo(pts[i][0] * sx, pts[i][1] * sy);
+    overlayCtx.lineTo(toScreenX(pts[i][0]), toScreenY(pts[i][1]));
   }
   overlayCtx.closePath();
   overlayCtx.stroke();
@@ -370,8 +386,8 @@ function drawOverlay(anchors, cells) {
   const labels = ['TL', 'TR', 'BR', 'BL'];
   const colors = ['#0f0', '#0f0', '#f80', '#0f0']; // BR in orange (hollow)
   for (let i = 0; i < 4; i++) {
-    const x = pts[i][0] * sx;
-    const y = pts[i][1] * sy;
+    const x = toScreenX(pts[i][0]);
+    const y = toScreenY(pts[i][1]);
 
     overlayCtx.fillStyle = colors[i];
     overlayCtx.beginPath();
@@ -387,8 +403,8 @@ function drawOverlay(anchors, cells) {
   if (cells) {
     overlayCtx.fillStyle = 'rgba(255, 255, 0, 0.5)';
     for (const pt of cells) {
-      const x = pt.x * sx;
-      const y = pt.y * sy;
+      const x = toScreenX(pt.x);
+      const y = toScreenY(pt.y);
       overlayCtx.beginPath();
       overlayCtx.arc(x, y, 2, 0, Math.PI * 2);
       overlayCtx.fill();
