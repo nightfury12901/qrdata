@@ -11,16 +11,16 @@
 
 // ---- Layout constants (must match sender.js) ----
 const GRID_SIZE = 32;
-const TOTAL_UNITS = 42;
-const GRID_ORIGIN_X = 5;
-const GRID_ORIGIN_Y = 5;
+const TOTAL_UNITS = 46;
+const GRID_ORIGIN_X = 7;
+const GRID_ORIGIN_Y = 7;
 
 // Ideal anchor centers in unit coordinates
 const IDEAL_ANCHORS = {
-  TL: [2, 2],
-  TR: [40, 2],
-  BL: [2, 40],
-  BR: [40, 40],
+  TL: [4, 4],
+  TR: [42, 4],
+  BL: [4, 42],
+  BR: [42, 42],
 };
 
 // Ideal cell centers
