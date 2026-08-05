@@ -25,6 +25,7 @@
     <div><span class="label">Decode FPS: </span><span class="value" id="statFPS">—</span></div>
     <div><span class="label">Success rate: </span><span class="value" id="statRate">—</span></div>
     <div><span class="label">Throughput: </span><span class="value" id="statThroughput">—</span></div>
+    <div><span class="label">Errors fixed: </span><span class="value" id="statErrors">—</span></div>
     <div><span class="label">Progress: </span><span class="value" id="statProgress">—</span></div>
     <div><span class="label">Anchors: </span><span class="value" id="statAnchors">—</span></div>
     <div><span class="label">px/cell: </span><span class="value" id="statPxCell">—</span></div>
@@ -35,6 +36,7 @@
   </div>
 
   <!-- Load modules (order matters: detect and homography before receiver) -->
+  <script src="reedsolomon.js"></script>
   <script src="protocol.js"></script>
   <script src="detect.js"></script>
   <script src="homography.js"></script>

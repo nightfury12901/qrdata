@@ -27,20 +27,20 @@
  */
 
 // ---- Layout constants (unit coordinates) ----
-const GRID_SIZE = 16;
-const TOTAL_UNITS = 26;
-const GRID_ORIGIN = { x: 5, y: 5 }; // top-left corner of the 16×16 data grid
+const GRID_SIZE = 32;
+const TOTAL_UNITS = 42;
+const GRID_ORIGIN = { x: 5, y: 5 }; // top-left corner of the 32x32 data grid
 
 const ANCHORS = [
   { x: 1, y: 1,  hollow: false }, // TL
-  { x: 23, y: 1, hollow: false }, // TR
-  { x: 1, y: 23, hollow: false }, // BL
-  { x: 23, y: 23, hollow: true }, // BR — orientation marker
+  { x: 39, y: 1, hollow: false }, // TR
+  { x: 1, y: 39, hollow: false }, // BL
+  { x: 39, y: 39, hollow: true }, // BR — orientation marker
 ];
 const ANCHOR_SIZE = 2; // units
 
 // ---- State ----
-// The pattern array maps to the 256 cells of the 16x16 grid (0 = black, 1 = white)
+// The pattern array maps to the 1024 cells of the 32x32 grid (0 = black, 1 = white)
 const pattern = new Uint8Array(GRID_SIZE * GRID_SIZE);
 
 let txInterval = null;
@@ -84,7 +84,7 @@ function render() {
     }
   }
 
-  // Draw 16×16 data grid
+  // Draw 32x32 data grid
   for (let row = 0; row < GRID_SIZE; row++) {
     for (let col = 0; col < GRID_SIZE; col++) {
       const cx = ox + (GRID_ORIGIN.x + col) * unit;
@@ -95,9 +95,9 @@ function render() {
   }
 }
 
-// Convert a 32-byte frame into the 256-bit pattern array
+// Convert a 128-byte frame into the 1024-bit pattern array
 function loadFrameToPattern(frameBytes) {
-  for (let i = 0; i < 32; i++) {
+  for (let i = 0; i < 128; i++) {
     const byte = frameBytes[i];
     for (let bit = 0; bit < 8; bit++) {
       // Extract bits from MSB to LSB
@@ -167,9 +167,9 @@ document.getElementById('btnStop').addEventListener('click', stopTransmission);
 window.addEventListener('resize', render);
 
 // Set default empty checkerboard pattern
-for (let i = 0; i < 256; i++) {
-  const row = Math.floor(i / 16);
-  const col = i % 16;
+for (let i = 0; i < 1024; i++) {
+  const row = Math.floor(i / 32);
+  const col = i % 32;
   pattern[i] = (row + col) % 2;
 }
 render();

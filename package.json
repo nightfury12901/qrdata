@@ -6,5 +6,12 @@
   "scripts": {
     "generate-cert": "node generate-cert.js",
     "start": "node server.js"
+  },
+  "main": "generate-cert.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "reedsolomon": "^1.0.0"
   }
 }

@@ -10,17 +10,17 @@
  */
 
 // ---- Layout constants (must match sender.js) ----
-const GRID_SIZE = 16;
-const TOTAL_UNITS = 26;
+const GRID_SIZE = 32;
+const TOTAL_UNITS = 42;
 const GRID_ORIGIN_X = 5;
 const GRID_ORIGIN_Y = 5;
 
 // Ideal anchor centers in unit coordinates
 const IDEAL_ANCHORS = {
   TL: [2, 2],
-  TR: [24, 2],
-  BL: [2, 24],
-  BR: [24, 24],
+  TR: [40, 2],
+  BL: [2, 40],
+  BR: [40, 40],
 };
 
 // Ideal cell centers
@@ -46,6 +46,7 @@ const statFPS = document.getElementById('statFPS');
 const statRate = document.getElementById('statRate');
 const statThroughput = document.getElementById('statThroughput');
 const statProgress = document.getElementById('statProgress');
+const statErrors = document.getElementById('statErrors');
 const statAnchors = document.getElementById('statAnchors');
 const statPxCell = document.getElementById('statPxCell');
 const statMessage = document.getElementById('statMessage');
@@ -55,6 +56,7 @@ const stats = {
   totalFrames: 0,
   successFrames: 0, // Successfully detected grid
   validFrames: 0,   // CRC passed
+  totalErrorsCorrected: 0,
   fpsFrames: 0,
   fpsStart: performance.now(),
   currentFPS: 0,
@@ -182,7 +184,7 @@ function decodeLoop() {
 
     if (H) {
       // 9. Sample each cell — collect brightness first, then apply LOCAL threshold
-      const numCells = GRID_SIZE * GRID_SIZE; // 256
+      const numCells = GRID_SIZE * GRID_SIZE; // 1024
       const cellBrightness = new Float64Array(numCells);
       const cellPositions = [];
 
@@ -209,9 +211,9 @@ function decodeLoop() {
         bits[i] = cellBrightness[i] > cellThreshold ? 1 : 0;
       }
 
-      // 10. Convert bits to 32 bytes
-      const frameBytes = new Uint8Array(32);
-      for (let i = 0; i < 32; i++) {
+      // 10. Convert bits to 128 bytes
+      const frameBytes = new Uint8Array(128);
+      for (let i = 0; i < 128; i++) {
         let byte = 0;
         for (let bit = 0; bit < 8; bit++) {
           byte = (byte << 1) | bits[i * 8 + bit];
@@ -226,6 +228,7 @@ function decodeLoop() {
       if (frame.valid) {
         if (stats.validFrames === 0) firstValidFrameTime = performance.now();
         stats.validFrames++;
+        stats.totalErrorsCorrected += frame.errorsCorrected;
         
         if (!receivedFrames.has(frame.seq)) {
           receivedFrames.set(frame.seq, frame.payload);
@@ -282,12 +285,14 @@ function decodeLoop() {
   // Calculate throughput
   if (firstValidFrameTime && stats.validFrames > 0) {
     const elapsedSec = (performance.now() - firstValidFrameTime) / 1000;
-    // Assuming 28 payload bytes per valid frame
-    const bytesReceived = stats.validFrames * 28;
+    // Assuming 96 payload bytes per valid frame (32x32 layout)
+    const bytesReceived = stats.validFrames * 96;
     statThroughput.textContent = elapsedSec > 0.5 ? `${Math.round(bytesReceived / elapsedSec)} B/s` : '—';
   } else {
     statThroughput.textContent = '—';
   }
+
+  statErrors.textContent = stats.totalErrorsCorrected > 0 ? stats.totalErrorsCorrected : '0';
 
   // Progress
   statProgress.textContent = expectedTotalFrames !== null
