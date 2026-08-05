@@ -220,58 +220,73 @@ function filterAnchors(blobs, frameW, frameH) {
  * and identify orientation (hollow anchor = BR).
  *
  * @param {Array} candidates — filtered blobs
- * @returns {{TL:[x,y], TR:[x,y], BL:[x,y], BR:[x,y], pixelsPerUnit:number}|null}
- */
-function identifyAnchors(candidates) {
+ * @returns {{TL:[x,y], TR:[x,y], BL:[x,y], BR:[x,y], pixfunction identifyAnchors(candidates) {
   if (candidates.length < 4) return null;
 
-  // Strategy: The 4 true anchors form the outermost corners of the pattern.
-  // Geometrically, they must lie on the convex hull of all blob candidates!
-  // By finding the convex hull first, we eliminate all interior grid data blobs
-  // instantly, reducing combinations drastically and guaranteeing we don't
-  // accidentally discard true anchors just because they are smaller than data blobs.
-  
-  candidates.sort((a, b) => a.cx !== b.cx ? a.cx - b.cx : a.cy - b.cy);
-  
-  const cross = (o, a, b) => (a.cx - o.cx) * (b.cy - o.cy) - (a.cy - o.cy) * (b.cx - o.cx);
-  
-  const lower = [];
-  for (let i = 0; i < candidates.length; i++) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], candidates[i]) <= 0) {
-      lower.pop();
+  // 1. Separate candidates into solid and hollow
+  const hollow = [];
+  const solid = [];
+  for (const c of candidates) {
+    if (c.solidity >= 0.55 && c.solidity <= 0.88) {
+      hollow.push(c);
+    } else if (c.solidity > 0.88) {
+      solid.push(c);
     }
-    lower.push(candidates[i]);
   }
-  
-  const upper = [];
-  for (let i = candidates.length - 1; i >= 0; i--) {
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], candidates[i]) <= 0) {
-      upper.pop();
-    }
-    upper.push(candidates[i]);
-  }
-  
-  upper.pop();
-  lower.pop();
-  
-  // The pool is now strictly the extreme outer blobs (usually 4 to 8 points)
-  const pool = lower.concat(upper);
-  // Just in case a weird geometry causes fewer than 4 points on the hull
-  if (pool.length < 4) return null;
+
+  if (hollow.length === 0 || solid.length < 3) return null;
 
   let bestQuad = null;
   let bestArea = 0;
 
-  // Try all combinations of 4 from the pool
-  for (let i = 0; i < pool.length - 3; i++) {
-    for (let j = i + 1; j < pool.length - 2; j++) {
-      for (let k = j + 1; k < pool.length - 1; k++) {
-        for (let l = k + 1; l < pool.length; l++) {
-          const pts = [pool[i], pool[j], pool[k], pool[l]];
-          const area = quadArea(pts);
+  // 2. Search for a square-ish configuration around each hollow anchor
+  for (const br of hollow) {
+    for (let i = 0; i < solid.length - 1; i++) {
+      for (let j = i + 1; j < solid.length; j++) {
+        const p1 = solid[i];
+        const p2 = solid[j];
+
+        const d1 = Math.hypot(p1.cx - br.cx, p1.cy - br.cy);
+        const d2 = Math.hypot(p2.cx - br.cx, p2.cy - br.cy);
+        
+        // Reject tiny configurations
+        if (d1 < 20 || d2 < 20) continue;
+
+        // Ratio of side lengths (allow some perspective skew)
+        const ratio = d1 / d2;
+        if (ratio < 0.6 || ratio > 1.6) continue;
+
+        // Angle between the two sides from BR must be ~90 degrees
+        const v1x = p1.cx - br.cx, v1y = p1.cy - br.cy;
+        const v2x = p2.cx - br.cx, v2y = p2.cy - br.cy;
+        const dot = v1x * v2x + v1y * v2y;
+        const cosTheta = dot / (d1 * d2);
+        // cos(60) = 0.5, cos(120) = -0.5. Must be roughly orthogonal.
+        if (Math.abs(cosTheta) > 0.6) continue;
+
+        // Expected TL position (parallelogram rule)
+        const expTLx = br.cx + v1x + v2x;
+        const expTLy = br.cy + v1y + v2y;
+
+        // Find the solid point closest to expected TL
+        let bestTL = null;
+        let bestTLDist = Infinity;
+        for (const p3 of solid) {
+          if (p3 === p1 || p3 === p2) continue;
+          const err = Math.hypot(p3.cx - expTLx, p3.cy - expTLy);
+          if (err < bestTLDist) {
+            bestTLDist = err;
+            bestTL = p3;
+          }
+        }
+
+        // Allow TL to deviate by up to 40% of the side length due to perspective
+        const maxErr = ((d1 + d2) / 2) * 0.4;
+        if (bestTLDist < maxErr && bestTL !== null) {
+          const area = quadArea([br, p1, bestTL, p2]);
           if (area > bestArea) {
             bestArea = area;
-            bestQuad = pts;
+            bestQuad = { br, p1, p2, tl: bestTL };
           }
         }
       }
@@ -280,89 +295,17 @@ function identifyAnchors(candidates) {
 
   if (!bestQuad) return null;
 
-  // Order the 4 points: find centroid, sort by angle
-  const centroid = {
-    x: (bestQuad[0].cx + bestQuad[1].cx + bestQuad[2].cx + bestQuad[3].cx) / 4,
-    y: (bestQuad[0].cy + bestQuad[1].cy + bestQuad[2].cy + bestQuad[3].cy) / 4,
-  };
+  const { br, p1, p2, tl } = bestQuad;
 
-  // Assign TL, TR, BL, BR by position relative to centroid
-  const topLeft = [], topRight = [], botLeft = [], botRight = [];
-  for (const p of bestQuad) {
-    if (p.cx < centroid.x && p.cy < centroid.y) topLeft.push(p);
-    else if (p.cx >= centroid.x && p.cy < centroid.y) topRight.push(p);
-    else if (p.cx < centroid.x && p.cy >= centroid.y) botLeft.push(p);
-    else botRight.push(p);
-  }
-
-  // Each quadrant should have exactly 1 point
-  if (topLeft.length !== 1 || topRight.length !== 1 ||
-      botLeft.length !== 1 || botRight.length !== 1) {
-    // Fallback: can't cleanly partition — try identifying hollow anchor first
-    return identifyByHollow(bestQuad, centroid);
-  }
-
-  let tl = topLeft[0], tr = topRight[0], bl = botLeft[0], br = botRight[0];
-
-  // Verify orientation: BR should be the hollow anchor (lowest solidity)
-  // If it isn't, rotate the assignment so the hollow one is at BR.
-  const allFour = [tl, tr, bl, br];
-  const hollowIdx = findHollowIndex(allFour);
-
-  if (hollowIdx !== null && hollowIdx !== 3) {
-    // Remap so hollow is at position 3 (BR)
-    const remapped = remapToHollow(allFour, hollowIdx);
-    if (remapped) {
-      [tl, tr, bl, br] = remapped;
-    }
-  }
-
-  // Compute pixels-per-unit from anchor distances
-  // TL to TR = 38 units (from x=2 to x=40)
-  const distTR = Math.hypot(tr.cx - tl.cx, tr.cy - tl.cy);
-  const distBL = Math.hypot(bl.cx - tl.cx, bl.cy - tl.cy);
-  const pixelsPerUnit = (distTR + distBL) / 76; // average of both 38-unit spans
-
-  return {
-    TL: [tl.cx, tl.cy],
-    TR: [tr.cx, tr.cy],
-    BL: [bl.cx, bl.cy],
-    BR: [br.cx, br.cy],
-    pixelsPerUnit,
-    // Pass solidity info for debug display
-    _blobs: { tl, tr, bl, br },
-  };
-}
-
-/**
- * Fallback identification using hollow anchor detection.
- */
-function identifyByHollow(quad, centroid) {
-  const hollowIdx = findHollowIndex(quad);
-  if (hollowIdx === null) return null;
-
-  // Hollow anchor is BR. The one diagonally opposite is TL.
-  const br = quad[hollowIdx];
-  const rest = quad.filter((_, i) => i !== hollowIdx);
-
-  // TL is the farthest from BR
-  rest.sort((a, b) => {
-    const da = Math.hypot(a.cx - br.cx, a.cy - br.cy);
-    const db = Math.hypot(b.cx - br.cx, b.cy - br.cy);
-    return db - da;
-  });
-  const tl = rest[0];
-  const [p1, p2] = [rest[1], rest[2]];
-
-  // Determine TR vs BL using cross product:
-  // Vector TL→BR, then check which side p1 and p2 are on
+  // Determine which of p1, p2 is TR and BL using cross product
+  // Vector from TL to BR
   const dx = br.cx - tl.cx;
   const dy = br.cy - tl.cy;
-
+  
   const cross1 = dx * (p1.cy - tl.cy) - dy * (p1.cx - tl.cx);
   const cross2 = dx * (p2.cy - tl.cy) - dy * (p2.cx - tl.cx);
 
-  // In screen coords (y down): negative cross = right of TL→BR line = TR side
+  // In screen coords (Y down), negative cross product is on the right side (TR)
   let tr, bl;
   if (cross1 < cross2) {
     tr = p1; bl = p2;
@@ -370,6 +313,7 @@ function identifyByHollow(quad, centroid) {
     tr = p2; bl = p1;
   }
 
+  // Compute pixels-per-unit for cell sampling (distance is 38 units)
   const distTR = Math.hypot(tr.cx - tl.cx, tr.cy - tl.cy);
   const distBL = Math.hypot(bl.cx - tl.cx, bl.cy - tl.cy);
   const pixelsPerUnit = (distTR + distBL) / 76;
@@ -382,67 +326,6 @@ function identifyByHollow(quad, centroid) {
     pixelsPerUnit,
     _blobs: { tl, tr, bl, br },
   };
-}
-
-/**
- * Find the index of the hollow anchor (lowest solidity) in an array of 4 blobs.
- * Returns null if no anchor is clearly hollow.
- */
-function findHollowIndex(blobs) {
-  let minSolidity = Infinity;
-  let minIdx = -1;
-  let secondMin = Infinity;
-
-  for (let i = 0; i < blobs.length; i++) {
-    if (blobs[i].solidity < minSolidity) {
-      secondMin = minSolidity;
-      minSolidity = blobs[i].solidity;
-      minIdx = i;
-    } else if (blobs[i].solidity < secondMin) {
-      secondMin = blobs[i].solidity;
-    }
-  }
-
-  // The hollow anchor should have notably lower solidity than the rest.
-  // Solid anchors: solidity ~0.95-1.0, Hollow: ~0.65-0.85
-  // Require at least 0.05 gap.
-  if (secondMin - minSolidity > 0.05) {
-    return minIdx;
-  }
-
-  return null; // can't reliably distinguish
-}
-
-/**
- * Remap 4 anchors so that the hollow one (at hollowIdx) ends up at index 3 (BR).
- * Maintains the correct spatial relationship.
- */
-function remapToHollow(pts, hollowIdx) {
-  // The hollow point is BR. Identify TL as the farthest from it.
-  const br = pts[hollowIdx];
-  const rest = pts.filter((_, i) => i !== hollowIdx);
-
-  rest.sort((a, b) => {
-    const da = Math.hypot(a.cx - br.cx, a.cy - br.cy);
-    const db = Math.hypot(b.cx - br.cx, b.cy - br.cy);
-    return db - da;
-  });
-  const tl = rest[0];
-  const [p1, p2] = [rest[1], rest[2]];
-
-  const dx = br.cx - tl.cx;
-  const dy = br.cy - tl.cy;
-  const cross1 = dx * (p1.cy - tl.cy) - dy * (p1.cx - tl.cx);
-  const cross2 = dx * (p2.cy - tl.cy) - dy * (p2.cx - tl.cx);
-
-  let tr, bl;
-  if (cross1 < cross2) {
-    tr = p1; bl = p2;
-  } else {
-    tr = p2; bl = p1;
-  }
-
-  return [tl, tr, bl, br];
 }
 
 /**
