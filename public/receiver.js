@@ -32,7 +32,7 @@ for (let row = 0; row < GRID_SIZE; row++) {
 }
 
 // ---- Processing config ----
-const PROC_SCALE = 0.5; // Process at half the camera resolution
+const PROC_SCALE = 1.0; // Process at full camera resolution for 32x32 density
 const SAMPLE_RADIUS = 2; // Pixel radius for cell brightness sampling
 
 // ---- DOM elements ----
@@ -172,7 +172,27 @@ function decodeLoop() {
   const candidates = filterAnchors(blobs, procW, procH);
 
   // 7. Identify the 4 anchors
-  const anchors = identifyAnchors(candidates);
+  const anchorsRaw = identifyAnchors(candidates, procW, procH);
+
+  // Temporal smoothing: reject detections that jump wildly from the previous frame.
+  // This prevents single-frame glitches where data cells form false quads.
+  let anchors = anchorsRaw;
+  if (anchors && stats.lastAnchors) {
+    const prevCenter = [
+      (stats.lastAnchors.TL[0] + stats.lastAnchors.BR[0]) / 2,
+      (stats.lastAnchors.TL[1] + stats.lastAnchors.BR[1]) / 2,
+    ];
+    const newCenter = [
+      (anchors.TL[0] + anchors.BR[0]) / 2,
+      (anchors.TL[1] + anchors.BR[1]) / 2,
+    ];
+    const jump = Math.hypot(newCenter[0] - prevCenter[0], newCenter[1] - prevCenter[1]);
+    const frameDiag = Math.hypot(procW, procH);
+    // If center jumped more than 20% of frame diagonal, reject this frame's detection
+    if (jump > frameDiag * 0.20) {
+      anchors = stats.lastAnchors; // reuse previous stable anchors
+    }
+  }
 
   let decoded = null;
 

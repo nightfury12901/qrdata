@@ -220,10 +220,20 @@ function filterAnchors(blobs, frameW, frameH) {
  * and identify orientation (hollow anchor = BR).
  *
  * @param {Array} candidates — filtered blobs
+ * @param {number} frameW — processing frame width
+ * @param {number} frameH — processing frame height
  * @returns {{TL:[x,y], TR:[x,y], BL:[x,y], BR:[x,y], pixelsPerUnit:number}}
  */
-function identifyAnchors(candidates) {
+function identifyAnchors(candidates, frameW, frameH) {
   if (candidates.length < 4) return null;
+
+  // Minimum quad diagonal: the true grid should fill a meaningful portion of the frame.
+  // At normal viewing distance, the grid fills 30-80% of the frame.
+  // The anchor diagonal spans ~54 units out of 46 total (corner to corner).
+  // Requiring 15% of frame diagonal eliminates tiny false-positive quads
+  // formed by clusters of data cells.
+  const frameDiag = Math.hypot(frameW, frameH);
+  const minQuadDiag = frameDiag * 0.15;
 
   // 1. Separate candidates into solid and hollow
   const hollow = [];
@@ -263,8 +273,11 @@ function identifyAnchors(candidates) {
         const d1 = Math.hypot(p1.cx - br.cx, p1.cy - br.cy);
         const d2 = Math.hypot(p2.cx - br.cx, p2.cy - br.cy);
         
-        // Reject tiny configurations
-        if (d1 < 20 || d2 < 20) continue;
+        // Reject tiny configurations — the side length between BR and an adjacent
+        // anchor spans 38 units. With minQuadDiag set to 15% of frame,
+        // each side must be at least minQuadDiag * 0.5 (since diag ≈ side * 1.41).
+        const minSide = minQuadDiag * 0.5;
+        if (d1 < minSide || d2 < minSide) continue;
 
         // Ratio of side lengths (allow some perspective skew)
         const ratio = d1 / d2;
@@ -308,6 +321,10 @@ function identifyAnchors(candidates) {
   }
 
   if (!bestQuad) return null;
+
+  // Final sanity check: quad diagonal must exceed minimum
+  const diagLen = Math.hypot(bestQuad.br.cx - bestQuad.tl.cx, bestQuad.br.cy - bestQuad.tl.cy);
+  if (diagLen < minQuadDiag) return null;
 
   const { br, p1, p2, tl } = bestQuad;
 
