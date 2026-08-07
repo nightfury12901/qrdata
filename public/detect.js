@@ -220,7 +220,9 @@ function filterAnchors(blobs, frameW, frameH) {
  * and identify orientation (hollow anchor = BR).
  *
  * @param {Array} candidates — filtered blobs
- * @returns {{TL:[x,y], TR:[x,y], BL:[x,y], BR:[x,y], pixfunction identifyAnchors(candidates) {
+ * @returns {{TL:[x,y], TR:[x,y], BL:[x,y], BR:[x,y], pixelsPerUnit:number}}
+ */
+function identifyAnchors(candidates) {
   if (candidates.length < 4) return null;
 
   // 1. Separate candidates into solid and hollow
