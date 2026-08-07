@@ -70,11 +70,42 @@ if (btnReset) {
     expectedTotalFrames = null;
     firstValidFrameTime = null;
     reassemblyComplete = false;
+    currentFileToDownload = null;
     statMessage.value = 'Waiting for frames...';
     if (btnDownload) {
       btnDownload.style.display = 'none';
       btnDownload.href = '';
     }
+  });
+}
+
+if (btnDownload) {
+  btnDownload.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (!currentFileToDownload) return;
+    
+    // 1. Try Web Share API (The gold standard for iOS / Safari / Mobile)
+    if (navigator.canShare && navigator.canShare({ files: [currentFileToDownload] })) {
+      try {
+        await navigator.share({
+          files: [currentFileToDownload],
+          title: currentFileToDownload.name
+        });
+        return; // Success!
+      } catch (err) {
+        console.log("Share API failed or user cancelled:", err);
+      }
+    }
+    
+    // 2. Fallback for Desktop Chrome/Edge/Firefox
+    const url = URL.createObjectURL(currentFileToDownload);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = currentFileToDownload.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 }
 
@@ -97,6 +128,7 @@ let receivedFrames = new Map();
 let expectedTotalFrames = null;
 let firstValidFrameTime = null;
 let reassemblyComplete = false;
+let currentFileToDownload = null;
 
 // ---- Processing canvas (offscreen) ----
 let procCanvas = null;
@@ -340,21 +372,15 @@ function decodeLoop() {
               
               // The rest of the payload is file data (flags === 2)
               const fileData = fullPayload.slice(metaLen);
-              const blob = new Blob([fileData], { type: meta.type || 'application/octet-stream' });
+              currentFileToDownload = new File([fileData], meta.name, { type: meta.type || 'application/octet-stream' });
               
               statMessage.value = `[File Transfer Complete]\nName: ${meta.name}\nSize: ${(meta.size / 1024).toFixed(1)} KB\nType: ${meta.type || 'unknown'}`;
               
               const btnDownload = document.getElementById('btnDownload');
               if (btnDownload) {
                 btnDownload.style.display = 'block';
-                btnDownload.download = meta.name;
-                
-                // Use FileReader to create a Base64 Data URL (much more reliable on iOS/mobile)
-                const reader = new FileReader();
-                reader.onloadend = function() {
-                  btnDownload.href = reader.result;
-                };
-                reader.readAsDataURL(blob);
+                btnDownload.href = 'javascript:void(0)';
+                btnDownload.removeAttribute('download');
               }
             } catch (e) {
               statMessage.value = "Failed to parse file metadata: " + e.message;
