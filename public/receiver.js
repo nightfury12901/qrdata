@@ -76,6 +76,8 @@ if (btnReset) {
       btnDownload.style.display = 'none';
       btnDownload.href = '';
     }
+    const fileContainer = document.getElementById('filePreviewContainer');
+    if (fileContainer) fileContainer.innerHTML = '';
   });
 }
 
@@ -98,14 +100,51 @@ if (btnDownload) {
     }
     
     // 2. Fallback for Desktop Chrome/Edge/Firefox
-    const url = URL.createObjectURL(currentFileToDownload);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = currentFileToDownload.name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    try {
+      const url = URL.createObjectURL(currentFileToDownload);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = currentFileToDownload.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      console.log("Desktop fallback failed:", e);
+    }
+    
+    // 3. Bulletproof Fallback (iOS Brave/Chrome)
+    // Render the file to the screen directly so the user can long-press to save
+    const fileContainer = document.getElementById('filePreviewContainer');
+    if (fileContainer) {
+      fileContainer.innerHTML = '';
+      if (currentFileToDownload.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const img = document.createElement('img');
+          img.src = ev.target.result;
+          img.style.maxWidth = '100%';
+          img.style.border = '2px solid #39f';
+          img.style.borderRadius = '8px';
+          fileContainer.appendChild(img);
+          alert("Image displayed! Long-press on the image below to save it.");
+        };
+        reader.readAsDataURL(currentFileToDownload);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const txt = document.createElement('textarea');
+          txt.value = ev.target.result;
+          txt.style.width = '100%';
+          txt.rows = 8;
+          txt.style.background = '#222';
+          txt.style.color = '#fff';
+          fileContainer.appendChild(txt);
+          alert("File contents displayed below.");
+        };
+        reader.readAsText(currentFileToDownload);
+      }
+    }
   });
 }
 
