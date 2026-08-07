@@ -73,10 +73,7 @@ if (btnReset) {
     statMessage.value = 'Waiting for frames...';
     if (btnDownload) {
       btnDownload.style.display = 'none';
-      if (btnDownload.href) {
-        URL.revokeObjectURL(btnDownload.href);
-        btnDownload.href = '';
-      }
+      btnDownload.href = '';
     }
   });
 }
@@ -343,16 +340,21 @@ function decodeLoop() {
               
               // The rest of the payload is file data (flags === 2)
               const fileData = fullPayload.slice(metaLen);
-              const blob = new Blob([fileData], { type: meta.type });
-              const url = URL.createObjectURL(blob);
+              const blob = new Blob([fileData], { type: meta.type || 'application/octet-stream' });
               
-              statMessage.value = `[File Transfer Complete]\nName: ${meta.name}\nSize: ${(meta.size / 1024).toFixed(1)} KB\nType: ${meta.type}`;
+              statMessage.value = `[File Transfer Complete]\nName: ${meta.name}\nSize: ${(meta.size / 1024).toFixed(1)} KB\nType: ${meta.type || 'unknown'}`;
               
               const btnDownload = document.getElementById('btnDownload');
               if (btnDownload) {
                 btnDownload.style.display = 'block';
-                btnDownload.href = url;
                 btnDownload.download = meta.name;
+                
+                // Use FileReader to create a Base64 Data URL (much more reliable on iOS/mobile)
+                const reader = new FileReader();
+                reader.onloadend = function() {
+                  btnDownload.href = reader.result;
+                };
+                reader.readAsDataURL(blob);
               }
             } catch (e) {
               statMessage.value = "Failed to parse file metadata: " + e.message;
