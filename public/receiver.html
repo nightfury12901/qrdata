@@ -32,18 +32,25 @@
     <div><span class="label">Anchors: </span><span class="value" id="statAnchors">—</span></div>
     <div><span class="label">px/cell: </span><span class="value" id="statPxCell">—</span></div>
     <div style="margin-top:8px;">
-      <div class="label" style="margin-bottom:4px;">Reassembled Message:</div>
-      <textarea id="statMessage" readonly rows="3"
-        style="width:100%; background:#000; color:#0f0; border:1px solid #333; padding:4px; font-family:monospace; resize:none;">Waiting for frames...</textarea>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <span class="label">Reassembled Output:</span>
+        <div style="display:flex; gap:4px;">
+          <button id="btnReset" style="background:#555; color:#fff; border:none; border-radius:4px; padding:2px 8px; cursor:pointer; font-size:12px;">Reset</button>
+          <button id="btnCopy" style="background:#333; color:#fff; border:none; border-radius:4px; padding:2px 8px; cursor:pointer; font-size:12px;">Copy Text</button>
+          <a id="btnDownload" style="display:none; background:#39f; color:#fff; border:none; border-radius:4px; padding:2px 8px; cursor:pointer; font-size:12px; text-decoration:none;">Download File</a>
+        </div>
+      </div>
+      <div id="fileProgress" style="display:none; font-size:12px; color:#aaa; margin-bottom:4px;"></div>
+      <textarea id="statMessage" readonly rows="3" style="width:100%; background:#000; color:#0f0; border:1px solid #333; padding:4px; font-family:monospace; resize:none;">Waiting for frames...</textarea>
     </div>
   </div>
 
   <!-- Load modules (order matters: detect and homography before receiver) -->
-  <script src="reedsolomon.js"></script>
-  <script src="protocol.js"></script>
-  <script src="detect.js"></script>
-  <script src="homography.js"></script>
-  <script src="receiver.js"></script>
+  <script src="reedsolomon.js?v=5"></script>
+  <script src="protocol.js?v=5"></script>
+  <script src="detect.js?v=5"></script>
+  <script src="homography.js?v=5"></script>
+  <script src="receiver.js?v=5"></script>
 </body>
 
 </html>

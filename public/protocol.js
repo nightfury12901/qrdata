@@ -24,9 +24,14 @@ const ECC_SIZE = 28;           // RS parity bytes per block
 const DATA_PER_BLOCK = BLOCK_SIZE - ECC_SIZE; // 100 data bytes per block
 const NUM_CHANNELS = 3;        // R, G, B
 const TOTAL_DATA = DATA_PER_BLOCK * NUM_CHANNELS; // 300 bytes total data
-const HEADER_SIZE = 4;         // seq(2) + length(2)
+const HEADER_SIZE = 5;         // seq(2) + length(2) + flags(1)
 const FOOTER_SIZE = 1;         // CRC-8
-const MAX_PAYLOAD_SIZE = TOTAL_DATA - HEADER_SIZE - FOOTER_SIZE; // 295 bytes
+const MAX_PAYLOAD_SIZE = TOTAL_DATA - HEADER_SIZE - FOOTER_SIZE; // 294 bytes
+
+// Protocol Flags
+const FLAG_TEXT = 0;
+const FLAG_FILE_META = 1;
+const FLAG_FILE_DATA = 2;
 
 let rsEncoder = null;
 let rsDecoder = null;
@@ -46,10 +51,11 @@ function initRS() {
  * Encodes a frame of data into 3 RS-encoded blocks (one per color channel).
  * @param {number} seq - Sequence number (0-32767)
  * @param {boolean} isEof - True if this is the last frame
+ * @param {number} flags - Protocol flags (0=text, 1=file meta, 2=file data)
  * @param {Uint8Array} payload - Up to MAX_PAYLOAD_SIZE bytes
  * @returns {Uint8Array[]} - Array of 3 blocks [R, G, B], each 128 bytes
  */
-function encodeFrame(seq, isEof, payload) {
+function encodeFrame(seq, isEof, flags, payload) {
   initRS();
   if (payload.length > MAX_PAYLOAD_SIZE) {
     throw new Error(`Payload too large: ${payload.length} > ${MAX_PAYLOAD_SIZE}`);
@@ -71,6 +77,9 @@ function encodeFrame(seq, isEof, payload) {
   // Length (2 bytes, little-endian)
   data[2] = payload.length & 0xFF;
   data[3] = (payload.length >> 8) & 0xFF;
+
+  // Flags
+  data[4] = flags & 0xFF;
 
   // Payload
   data.set(payload, HEADER_SIZE);
@@ -141,6 +150,7 @@ function decodeFrame(rBlock, gBlock, bBlock) {
   const seq = seqWithEof & 0x7FFF;
   const isEof = (seqWithEof & 0x8000) !== 0;
   const length = decoded[2] | (decoded[3] << 8);
+  const flags = decoded[4];
 
   if (length > MAX_PAYLOAD_SIZE) {
     return { valid: false, errorsCorrected: totalErrors };
@@ -152,6 +162,7 @@ function decodeFrame(rBlock, gBlock, bBlock) {
     valid: true,
     seq,
     isEof,
+    flags,
     payload,
     errorsCorrected: totalErrors
   };

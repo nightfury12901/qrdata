@@ -98,35 +98,65 @@ function loadBlocksToPattern(blocks) {
 
 // ---- Transmission Logic ----
 
-function startTransmission() {
+async function startTransmission() {
   const text = document.getElementById('msgInput').value;
-  if (!text) return;
+  const fileInput = document.getElementById('fileInput');
+  const file = fileInput.files[0];
 
-  const payloadBytes = new TextEncoder().encode(text);
+  if (!text && !file) return;
 
   currentFrames = [];
-  let offset = 0;
   let seq = 0;
 
-  while (offset < payloadBytes.length || offset === 0) {
-    const chunk = payloadBytes.slice(offset, offset + MAX_PAYLOAD_SIZE);
-    const isEof = (offset + MAX_PAYLOAD_SIZE) >= payloadBytes.length;
+  if (file) {
+    if (file.size > 1024 * 1024) {
+      alert("File is too large (max 1MB)");
+      return;
+    }
+    
+    // Create Metadata Frame (filename, size, mime)
+    const metaObj = {
+      name: file.name,
+      size: file.size,
+      type: file.type
+    };
+    const metaBytes = new TextEncoder().encode(JSON.stringify(metaObj));
+    currentFrames.push(encodeFrame(seq++, false, FLAG_FILE_META, metaBytes));
 
-    // encodeFrame now returns [rBlock, gBlock, bBlock]
-    const blocks = encodeFrame(seq, isEof, chunk);
-    currentFrames.push(blocks);
-
-    offset += chunk.length;
-    seq++;
+    // Chunk File Data
+    const arrayBuffer = await file.arrayBuffer();
+    const payloadBytes = new Uint8Array(arrayBuffer);
+    
+    let offset = 0;
+    while (offset < payloadBytes.length) {
+      const chunk = payloadBytes.slice(offset, offset + MAX_PAYLOAD_SIZE);
+      const isEof = (offset + MAX_PAYLOAD_SIZE) >= payloadBytes.length;
+      currentFrames.push(encodeFrame(seq++, isEof, FLAG_FILE_DATA, chunk));
+      offset += chunk.length;
+    }
+  } else {
+    // Regular text transmission
+    const payloadBytes = new TextEncoder().encode(text);
+    let offset = 0;
+    while (offset < payloadBytes.length || offset === 0) {
+      const chunk = payloadBytes.slice(offset, offset + MAX_PAYLOAD_SIZE);
+      const isEof = (offset + MAX_PAYLOAD_SIZE) >= payloadBytes.length;
+      currentFrames.push(encodeFrame(seq++, isEof, FLAG_TEXT, chunk));
+      offset += chunk.length;
+    }
   }
 
   frameIndex = 0;
   document.getElementById('btnStart').disabled = true;
   document.getElementById('btnStop').disabled = false;
   document.getElementById('msgInput').disabled = true;
+  document.getElementById('fileInput').disabled = true;
+  document.getElementById('speedSlider').disabled = true;
   document.getElementById('txStatus').textContent = 'Transmitting...';
 
-  // Transmit loop (~30 FPS)
+  const speedMs = parseInt(document.getElementById('speedSlider').value);
+
+  // Transmit loop
   txInterval = setInterval(() => {
     loadBlocksToPattern(currentFrames[frameIndex]);
     render();
@@ -134,7 +164,7 @@ function startTransmission() {
     document.getElementById('txFrame').textContent = `Frame ${frameIndex + 1} of ${currentFrames.length}`;
 
     frameIndex = (frameIndex + 1) % currentFrames.length;
-  }, 33);
+  }, speedMs);
 }
 
 function stopTransmission() {
@@ -145,6 +175,8 @@ function stopTransmission() {
   document.getElementById('btnStart').disabled = false;
   document.getElementById('btnStop').disabled = true;
   document.getElementById('msgInput').disabled = false;
+  document.getElementById('fileInput').disabled = false;
+  document.getElementById('speedSlider').disabled = false;
   document.getElementById('txStatus').textContent = 'Idle';
   document.getElementById('txFrame').textContent = '—';
 }
@@ -153,6 +185,12 @@ function stopTransmission() {
 document.getElementById('btnStart').addEventListener('click', startTransmission);
 document.getElementById('btnStop').addEventListener('click', stopTransmission);
 window.addEventListener('resize', render);
+
+const speedSlider = document.getElementById('speedSlider');
+const speedLabel = document.getElementById('speedLabel');
+speedSlider.addEventListener('input', () => {
+  speedLabel.textContent = `${speedSlider.value}ms`;
+});
 
 // Default rainbow pattern to show off RGB mode
 for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {

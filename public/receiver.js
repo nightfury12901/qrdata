@@ -51,6 +51,8 @@ const statAnchors = document.getElementById('statAnchors');
 const statPxCell = document.getElementById('statPxCell');
 const statMessage = document.getElementById('statMessage');
 const btnCopy = document.getElementById('btnCopy');
+const btnReset = document.getElementById('btnReset');
+const btnDownload = document.getElementById('btnDownload');
 
 if (btnCopy) {
   btnCopy.addEventListener('click', () => {
@@ -59,6 +61,23 @@ if (btnCopy) {
     const oldText = btnCopy.textContent;
     btnCopy.textContent = 'Copied!';
     setTimeout(() => btnCopy.textContent = oldText, 2000);
+  });
+}
+
+if (btnReset) {
+  btnReset.addEventListener('click', () => {
+    receivedFrames.clear();
+    expectedTotalFrames = null;
+    firstValidFrameTime = null;
+    reassemblyComplete = false;
+    statMessage.value = 'Waiting for frames...';
+    if (btnDownload) {
+      btnDownload.style.display = 'none';
+      if (btnDownload.href) {
+        URL.revokeObjectURL(btnDownload.href);
+        btnDownload.href = '';
+      }
+    }
   });
 }
 
@@ -291,7 +310,7 @@ function decodeLoop() {
         stats.totalErrorsCorrected += frame.errorsCorrected;
         
         if (!receivedFrames.has(frame.seq)) {
-          receivedFrames.set(frame.seq, frame.payload);
+          receivedFrames.set(frame.seq, frame);
         }
         if (frame.isEof) {
           expectedTotalFrames = frame.seq + 1;
@@ -303,18 +322,46 @@ function decodeLoop() {
           // Concatenate all payloads
           const sortedSeq = Array.from(receivedFrames.keys()).sort((a, b) => a - b);
           let totalLen = 0;
-          for (let s of sortedSeq) totalLen += receivedFrames.get(s).length;
+          for (let s of sortedSeq) totalLen += receivedFrames.get(s).payload.length;
           
           const fullPayload = new Uint8Array(totalLen);
           let offset = 0;
           for (let s of sortedSeq) {
-            const p = receivedFrames.get(s);
+            const p = receivedFrames.get(s).payload;
             fullPayload.set(p, offset);
             offset += p.length;
           }
           
-          const msg = new TextDecoder().decode(fullPayload);
-          statMessage.value = msg;
+          // Check flags from the first frame to see if it's a file transfer
+          const firstFrame = receivedFrames.get(0);
+          if (firstFrame && firstFrame.flags === 1 /* FLAG_FILE_META */) {
+            try {
+              // Parse metadata
+              const metaLen = firstFrame.payload.length;
+              const metaJson = new TextDecoder().decode(firstFrame.payload);
+              const meta = JSON.parse(metaJson);
+              
+              // The rest of the payload is file data (flags === 2)
+              const fileData = fullPayload.slice(metaLen);
+              const blob = new Blob([fileData], { type: meta.type });
+              const url = URL.createObjectURL(blob);
+              
+              statMessage.value = `[File Transfer Complete]\nName: ${meta.name}\nSize: ${(meta.size / 1024).toFixed(1)} KB\nType: ${meta.type}`;
+              
+              const btnDownload = document.getElementById('btnDownload');
+              if (btnDownload) {
+                btnDownload.style.display = 'block';
+                btnDownload.href = url;
+                btnDownload.download = meta.name;
+              }
+            } catch (e) {
+              statMessage.value = "Failed to parse file metadata: " + e.message;
+            }
+          } else {
+            // Regular text message
+            const msg = new TextDecoder().decode(fullPayload);
+            statMessage.value = msg;
+          }
         }
         decoded = true;
       }
