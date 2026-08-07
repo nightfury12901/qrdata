@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Photon — Receiver</title>
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body class="receiver-page">
   <!-- Landscape-only prompt -->
   <div class="rotate-prompt">
@@ -31,7 +33,8 @@
     <div><span class="label">px/cell: </span><span class="value" id="statPxCell">—</span></div>
     <div style="margin-top:8px;">
       <div class="label" style="margin-bottom:4px;">Reassembled Message:</div>
-      <textarea id="statMessage" readonly rows="3" style="width:100%; background:#000; color:#0f0; border:1px solid #333; padding:4px; font-family:monospace; resize:none;">Waiting for frames...</textarea>
+      <textarea id="statMessage" readonly rows="3"
+        style="width:100%; background:#000; color:#0f0; border:1px solid #333; padding:4px; font-family:monospace; resize:none;">Waiting for frames...</textarea>
     </div>
   </div>
 
@@ -42,4 +45,5 @@
   <script src="homography.js"></script>
   <script src="receiver.js"></script>
 </body>
+
 </html>

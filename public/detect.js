@@ -394,6 +394,16 @@ function quadArea(pts) {
  * @param {number} radius — half-size of sampling window
  * @returns {number} average brightness (0-255)
  */
+/**
+ * Sample a small area of a grayscale image and return average brightness.
+ * @param {Uint8Array} gray
+ * @param {number} width
+ * @param {number} height
+ * @param {number} cx — center x (can be fractional)
+ * @param {number} cy — center y
+ * @param {number} radius — half-size of sampling window
+ * @returns {number} average brightness (0-255)
+ */
 function sampleArea(gray, width, height, cx, cy, radius) {
   const x0 = Math.max(0, Math.floor(cx - radius));
   const y0 = Math.max(0, Math.floor(cy - radius));
@@ -411,6 +421,41 @@ function sampleArea(gray, width, height, cx, cy, radius) {
   return count > 0 ? sum / count : 128;
 }
 
+/**
+ * Sample a small area of RGBA image data and return average R, G, B.
+ * @param {Uint8ClampedArray} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} radius
+ * @returns {{r:number, g:number, b:number}} average RGB (0-255)
+ */
+function sampleAreaRGB(rgba, width, height, cx, cy, radius) {
+  const x0 = Math.max(0, Math.floor(cx - radius));
+  const y0 = Math.max(0, Math.floor(cy - radius));
+  const x1 = Math.min(width - 1, Math.ceil(cx + radius));
+  const y1 = Math.min(height - 1, Math.ceil(cy + radius));
+
+  let sumR = 0, sumG = 0, sumB = 0, count = 0;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const off = (y * width + x) * 4;
+      sumR += rgba[off];
+      sumG += rgba[off + 1];
+      sumB += rgba[off + 2];
+      count++;
+    }
+  }
+
+  if (count === 0) return { r: 128, g: 128, b: 128 };
+  return {
+    r: sumR / count,
+    g: sumG / count,
+    b: sumB / count
+  };
+}
+
 // ---- Export globals ----
 window.toGrayscale = toGrayscale;
 window.otsuThreshold = otsuThreshold;
@@ -419,3 +464,4 @@ window.findBlobs = findBlobs;
 window.filterAnchors = filterAnchors;
 window.identifyAnchors = identifyAnchors;
 window.sampleArea = sampleArea;
+window.sampleAreaRGB = sampleAreaRGB;

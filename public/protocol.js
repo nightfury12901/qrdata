@@ -1,4 +1,6 @@
-// Photon Framing Protocol
+// Photon Framing Protocol — RGB Mode
+// Each frame uses 3 independent RS blocks (R, G, B channels).
+// This gives independent error correction per color channel.
 
 // CRC-8 calculation (polynomial 0x07)
 function crc8(data) {
@@ -16,11 +18,15 @@ function crc8(data) {
   return crc & 0xFF;
 }
 
-const FRAME_SIZE_BYTES = 128; // 32x32 grid = 1024 bits = 128 bytes
-const ECC_SIZE = 28;         // Reed-Solomon parity bytes
-const HEADER_SIZE = 3;       // 2 bytes seq/EOF, 1 byte length
-const FOOTER_SIZE = 1;       // 1 byte CRC (sanity check)
-const MAX_PAYLOAD_SIZE = FRAME_SIZE_BYTES - HEADER_SIZE - FOOTER_SIZE - ECC_SIZE; // 96 bytes
+// ---- Layout constants ----
+const BLOCK_SIZE = 128;        // bytes per RS block (1024 cells / 8 bits)
+const ECC_SIZE = 28;           // RS parity bytes per block
+const DATA_PER_BLOCK = BLOCK_SIZE - ECC_SIZE; // 100 data bytes per block
+const NUM_CHANNELS = 3;        // R, G, B
+const TOTAL_DATA = DATA_PER_BLOCK * NUM_CHANNELS; // 300 bytes total data
+const HEADER_SIZE = 4;         // seq(2) + length(2)
+const FOOTER_SIZE = 1;         // CRC-8
+const MAX_PAYLOAD_SIZE = TOTAL_DATA - HEADER_SIZE - FOOTER_SIZE; // 295 bytes
 
 let rsEncoder = null;
 let rsDecoder = null;
@@ -37,111 +43,116 @@ function initRS() {
 }
 
 /**
- * Encodes a frame of data.
+ * Encodes a frame of data into 3 RS-encoded blocks (one per color channel).
  * @param {number} seq - Sequence number (0-32767)
  * @param {boolean} isEof - True if this is the last frame
  * @param {Uint8Array} payload - Up to MAX_PAYLOAD_SIZE bytes
- * @returns {Uint8Array} - 128-byte frame
+ * @returns {Uint8Array[]} - Array of 3 blocks [R, G, B], each 128 bytes
  */
 function encodeFrame(seq, isEof, payload) {
   initRS();
   if (payload.length > MAX_PAYLOAD_SIZE) {
     throw new Error(`Payload too large: ${payload.length} > ${MAX_PAYLOAD_SIZE}`);
   }
-  
-  const frame = new Uint8Array(FRAME_SIZE_BYTES);
-  
-  // Fill payload area with random bytes for high-frequency noise
-  for (let i = HEADER_SIZE; i < FRAME_SIZE_BYTES - ECC_SIZE - FOOTER_SIZE; i++) {
-    frame[i] = Math.floor(Math.random() * 256);
+
+  // Build 300-byte data buffer
+  const data = new Uint8Array(TOTAL_DATA);
+
+  // Fill with random bytes for visual noise (prevents large single-color regions)
+  for (let i = HEADER_SIZE; i < TOTAL_DATA - FOOTER_SIZE; i++) {
+    data[i] = Math.floor(Math.random() * 256);
   }
-  
-  // Seq (15 bits) + EOF flag (MSB)
+
+  // Header: seq (15 bits) + EOF flag (MSB of byte 1)
   const seqWithEof = (seq & 0x7FFF) | (isEof ? 0x8000 : 0);
-  frame[0] = seqWithEof & 0xFF;        // LSB
-  frame[1] = (seqWithEof >> 8) & 0xFF; // MSB
-  
-  // Length
-  frame[2] = payload.length & 0xFF;
-  
+  data[0] = seqWithEof & 0xFF;
+  data[1] = (seqWithEof >> 8) & 0xFF;
+
+  // Length (2 bytes, little-endian)
+  data[2] = payload.length & 0xFF;
+  data[3] = (payload.length >> 8) & 0xFF;
+
   // Payload
-  frame.set(payload, 3);
-  
-  // CRC covers header and payload area
-  const dataLen = FRAME_SIZE_BYTES - ECC_SIZE;
-  frame[dataLen - 1] = crc8(frame.subarray(0, dataLen - 1));
-  
-  // Compute RS Parity
-  // RS library expects Int32Array with data at start and 0s at end
-  const rsData = new Int32Array(FRAME_SIZE_BYTES);
-  for (let i = 0; i < dataLen; i++) {
-    rsData[i] = frame[i];
+  data.set(payload, HEADER_SIZE);
+
+  // CRC at last byte covers bytes 0..298
+  data[TOTAL_DATA - 1] = crc8(data.subarray(0, TOTAL_DATA - 1));
+
+  // Split into 3 blocks of 100 data bytes and RS encode each
+  const blocks = [];
+  for (let ch = 0; ch < NUM_CHANNELS; ch++) {
+    const offset = ch * DATA_PER_BLOCK;
+    const rsData = new Int32Array(BLOCK_SIZE);
+    for (let i = 0; i < DATA_PER_BLOCK; i++) {
+      rsData[i] = data[offset + i];
+    }
+    rsEncoder.encode(rsData, ECC_SIZE);
+
+    const encoded = new Uint8Array(BLOCK_SIZE);
+    for (let i = 0; i < BLOCK_SIZE; i++) {
+      encoded[i] = rsData[i];
+    }
+    blocks.push(encoded);
   }
-  rsEncoder.encode(rsData, ECC_SIZE);
-  
-  // Copy parity back to frame
-  for (let i = 0; i < FRAME_SIZE_BYTES; i++) {
-    frame[i] = rsData[i];
-  }
-  
-  return frame;
+
+  return blocks; // [rBlock, gBlock, bBlock]
 }
 
 /**
- * Decodes and validates a frame.
- * @param {Uint8Array} frame - 128-byte frame
- * @returns {Object} - { valid, seq, isEof, payload, errorsCorrected }
+ * Decodes and validates a frame from 3 RS-encoded blocks.
+ * @param {Uint8Array} rBlock - 128-byte R channel block
+ * @param {Uint8Array} gBlock - 128-byte G channel block
+ * @param {Uint8Array} bBlock - 128-byte B channel block
+ * @returns {Object} - { valid, seq, isEof, payload, errorsCorrected, failedChannel }
  */
-function decodeFrame(frame) {
+function decodeFrame(rBlock, gBlock, bBlock) {
   initRS();
-  if (frame.length !== FRAME_SIZE_BYTES) {
-    return { valid: false, errorsCorrected: 0 };
+
+  const blocks = [rBlock, gBlock, bBlock];
+  const decoded = new Uint8Array(TOTAL_DATA);
+  let totalErrors = 0;
+
+  for (let ch = 0; ch < NUM_CHANNELS; ch++) {
+    const rsData = new Int32Array(BLOCK_SIZE);
+    for (let i = 0; i < BLOCK_SIZE; i++) {
+      rsData[i] = blocks[ch][i];
+    }
+
+    try {
+      totalErrors += rsDecoder.decode(rsData, ECC_SIZE);
+    } catch (e) {
+      return { valid: false, errorsCorrected: 0, failedChannel: ch };
+    }
+
+    const offset = ch * DATA_PER_BLOCK;
+    for (let i = 0; i < DATA_PER_BLOCK; i++) {
+      decoded[offset + i] = rsData[i];
+    }
   }
-  
-  const rsData = new Int32Array(FRAME_SIZE_BYTES);
-  for (let i = 0; i < FRAME_SIZE_BYTES; i++) {
-    rsData[i] = frame[i];
+
+  // Verify CRC
+  const calculatedCrc = crc8(decoded.subarray(0, TOTAL_DATA - 1));
+  if (calculatedCrc !== decoded[TOTAL_DATA - 1]) {
+    return { valid: false, errorsCorrected: totalErrors };
   }
-  
-  let errorsCorrected = 0;
-  try {
-    // decode returns the number of errors corrected, or throws if uncorrectable
-    errorsCorrected = rsDecoder.decode(rsData, ECC_SIZE);
-  } catch (e) {
-    return { valid: false, errorsCorrected: 0 };
-  }
-  
-  // Copy corrected data back
-  const correctedFrame = new Uint8Array(FRAME_SIZE_BYTES);
-  for (let i = 0; i < FRAME_SIZE_BYTES; i++) {
-    correctedFrame[i] = rsData[i];
-  }
-  
-  const dataLen = FRAME_SIZE_BYTES - ECC_SIZE;
-  
-  // Check CRC on corrected data
-  const calculatedCrc = crc8(correctedFrame.subarray(0, dataLen - 1));
-  if (calculatedCrc !== correctedFrame[dataLen - 1]) {
-    return { valid: false, errorsCorrected };
-  }
-  
-  const seqWithEof = correctedFrame[0] | (correctedFrame[1] << 8);
+
+  // Extract header
+  const seqWithEof = decoded[0] | (decoded[1] << 8);
   const seq = seqWithEof & 0x7FFF;
   const isEof = (seqWithEof & 0x8000) !== 0;
-  const length = correctedFrame[2];
-  
-  // Sanity check length
+  const length = decoded[2] | (decoded[3] << 8);
+
   if (length > MAX_PAYLOAD_SIZE) {
-    return { valid: false, errorsCorrected };
+    return { valid: false, errorsCorrected: totalErrors };
   }
-  
-  const payload = correctedFrame.subarray(3, 3 + length);
-  
+
+  const payload = new Uint8Array(decoded.subarray(HEADER_SIZE, HEADER_SIZE + length));
+
   return {
     valid: true,
     seq,
     isEof,
     payload,
-    errorsCorrected
+    errorsCorrected: totalErrors
   };
 }

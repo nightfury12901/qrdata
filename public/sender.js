@@ -1,35 +1,15 @@
 /**
- * sender.js — Renders a 16×16 black/white data grid with 4 corner anchor
- * markers on a canvas element. The pattern is displayed for the receiver's
- * camera to decode.
+ * sender.js — Renders a 32×32 RGB data grid with 4 corner anchor
+ * markers on a canvas element. Each cell encodes 3 bits (R, G, B).
  *
- * Grid layout (in "unit" coordinates, 24×24 total):
- *
- *   0  1  2  3  4 ................. 19 20 21 22 23
- *   ┌──┬──────┬──┬───────────────────┬──┬──────┬──┐
- * 0 │QZ│      │  │                   │  │      │QZ│
- * 1 │  │ TL■■ │  │                   │  │ ■■TR │  │
- * 2 │  │ ■■■■ │  │                   │  │ ■■■■ │  │
- * 3 │  │      │MG│                   │MG│      │  │
- * 4 │  │  MG  │  │  16×16 grid       │  │  MG  │  │
- *   │  │      │  │  of data          │  │      │  │
- *   │  │      │  │  cells            │  │      │  │
- *19 │  │      │  │                   │  │      │  │
- *20 │  │      │MG│                   │MG│      │  │
- *21 │  │ BL■■ │  │                   │  │ □□BR │  │  ← BR is hollow
- *22 │  │ ■■■■ │  │                   │  │ □□□□ │  │
- *23 │QZ│      │  │                   │  │      │QZ│
- *   └──┴──────┴──┴───────────────────┴──┴──────┴──┘
- *
- * QZ = quiet zone (white, 1 unit)
- * MG = margin (white, 1 unit gap between anchors and grid)
- * Anchors are 2×2 units. BR anchor is hollow (orientation marker).
+ * The anchors remain black/white for reliable detection.
+ * Data cells use 8 distinct RGB colors (one per 3-bit combination).
  */
 
 // ---- Layout constants (unit coordinates) ----
 const GRID_SIZE = 32;
 const TOTAL_UNITS = 46;
-const GRID_ORIGIN = { x: 7, y: 7 }; // top-left corner of the 32x32 data grid
+const GRID_ORIGIN = { x: 7, y: 7 };
 
 const ANCHORS = [
   { x: 3, y: 3,  hollow: false }, // TL
@@ -40,11 +20,13 @@ const ANCHORS = [
 const ANCHOR_SIZE = 2; // units
 
 // ---- State ----
-// The pattern array maps to the 1024 cells of the 32x32 grid (0 = black, 1 = white)
-const pattern = new Uint8Array(GRID_SIZE * GRID_SIZE);
+// 3 pattern arrays: one per color channel (0 = off, 1 = on)
+const patternR = new Uint8Array(GRID_SIZE * GRID_SIZE);
+const patternG = new Uint8Array(GRID_SIZE * GRID_SIZE);
+const patternB = new Uint8Array(GRID_SIZE * GRID_SIZE);
 
 let txInterval = null;
-let currentFrames = []; // Array of Uint8Array (32 bytes each)
+let currentFrames = []; // Array of [rBlock, gBlock, bBlock] arrays
 let frameIndex = 0;
 
 // ---- Canvas rendering ----
@@ -55,7 +37,6 @@ function render() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
-  // Reserve space for the control panel so it doesn't overlap the top anchors
   const topReserved = 100;
   const availHeight = canvas.height - topReserved;
 
@@ -65,10 +46,11 @@ function render() {
   const ox = (canvas.width - patternPx) / 2;
   const oy = topReserved + (availHeight - patternPx) / 2;
 
+  // White background
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Draw anchors
+  // Draw anchors (always black/white)
   for (const anchor of ANCHORS) {
     const ax = ox + anchor.x * unit;
     const ay = oy + anchor.y * unit;
@@ -84,24 +66,32 @@ function render() {
     }
   }
 
-  // Draw 32x32 data grid
+  // Draw 32x32 RGB data grid
   for (let row = 0; row < GRID_SIZE; row++) {
     for (let col = 0; col < GRID_SIZE; col++) {
+      const idx = row * GRID_SIZE + col;
+      const r = patternR[idx] * 255;
+      const g = patternG[idx] * 255;
+      const b = patternB[idx] * 255;
+
       const cx = ox + (GRID_ORIGIN.x + col) * unit;
       const cy = oy + (GRID_ORIGIN.y + row) * unit;
-      ctx.fillStyle = pattern[row * GRID_SIZE + col] ? '#ffffff' : '#000000';
-      ctx.fillRect(cx, cy, unit, unit);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(cx, cy, Math.ceil(unit), Math.ceil(unit));
     }
   }
 }
 
-// Convert a 128-byte frame into the 1024-bit pattern array
-function loadFrameToPattern(frameBytes) {
+// Load 3 RS-encoded blocks into the RGB pattern arrays
+function loadBlocksToPattern(blocks) {
+  const [rBlock, gBlock, bBlock] = blocks;
   for (let i = 0; i < 128; i++) {
-    const byte = frameBytes[i];
     for (let bit = 0; bit < 8; bit++) {
-      // Extract bits from MSB to LSB
-      pattern[i * 8 + bit] = (byte >> (7 - bit)) & 1;
+      const cellIdx = i * 8 + bit;
+      if (cellIdx >= GRID_SIZE * GRID_SIZE) break;
+      patternR[cellIdx] = (rBlock[i] >> (7 - bit)) & 1;
+      patternG[cellIdx] = (gBlock[i] >> (7 - bit)) & 1;
+      patternB[cellIdx] = (bBlock[i] >> (7 - bit)) & 1;
     }
   }
 }
@@ -111,41 +101,39 @@ function loadFrameToPattern(frameBytes) {
 function startTransmission() {
   const text = document.getElementById('msgInput').value;
   if (!text) return;
-  
-  // Convert text to UTF-8
+
   const payloadBytes = new TextEncoder().encode(text);
-  
-  // Chunk payload into MAX_PAYLOAD_SIZE (28 bytes) chunks
+
   currentFrames = [];
   let offset = 0;
   let seq = 0;
-  
-  while (offset < payloadBytes.length || offset === 0 /* guarantee at least 1 frame */) {
+
+  while (offset < payloadBytes.length || offset === 0) {
     const chunk = payloadBytes.slice(offset, offset + MAX_PAYLOAD_SIZE);
     const isEof = (offset + MAX_PAYLOAD_SIZE) >= payloadBytes.length;
-    
-    // encodeFrame from protocol.js
-    const frame = encodeFrame(seq, isEof, chunk);
-    currentFrames.push(frame);
-    
+
+    // encodeFrame now returns [rBlock, gBlock, bBlock]
+    const blocks = encodeFrame(seq, isEof, chunk);
+    currentFrames.push(blocks);
+
     offset += chunk.length;
     seq++;
   }
-  
+
   frameIndex = 0;
   document.getElementById('btnStart').disabled = true;
   document.getElementById('btnStop').disabled = false;
   document.getElementById('msgInput').disabled = true;
   document.getElementById('txStatus').textContent = 'Transmitting...';
-  
-  // Transmit loop (target 30 FPS = ~33ms per frame)
+
+  // Transmit loop (~30 FPS)
   txInterval = setInterval(() => {
-    loadFrameToPattern(currentFrames[frameIndex]);
+    loadBlocksToPattern(currentFrames[frameIndex]);
     render();
-    
+
     document.getElementById('txFrame').textContent = `Frame ${frameIndex + 1} of ${currentFrames.length}`;
-    
-    frameIndex = (frameIndex + 1) % currentFrames.length; // Loop infinitely
+
+    frameIndex = (frameIndex + 1) % currentFrames.length;
   }, 33);
 }
 
@@ -166,10 +154,14 @@ document.getElementById('btnStart').addEventListener('click', startTransmission)
 document.getElementById('btnStop').addEventListener('click', stopTransmission);
 window.addEventListener('resize', render);
 
-// Set default empty checkerboard pattern
-for (let i = 0; i < 1024; i++) {
-  const row = Math.floor(i / 32);
-  const col = i % 32;
-  pattern[i] = (row + col) % 2;
+// Default rainbow pattern to show off RGB mode
+for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+  const row = Math.floor(i / GRID_SIZE);
+  const col = i % GRID_SIZE;
+  // Create a colorful pattern: cycle through all 8 colors
+  const colorIdx = (row + col) % 8;
+  patternR[i] = (colorIdx >> 2) & 1;
+  patternG[i] = (colorIdx >> 1) & 1;
+  patternB[i] = colorIdx & 1;
 }
 render();

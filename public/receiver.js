@@ -50,6 +50,17 @@ const statErrors = document.getElementById('statErrors');
 const statAnchors = document.getElementById('statAnchors');
 const statPxCell = document.getElementById('statPxCell');
 const statMessage = document.getElementById('statMessage');
+const btnCopy = document.getElementById('btnCopy');
+
+if (btnCopy) {
+  btnCopy.addEventListener('click', () => {
+    statMessage.select();
+    document.execCommand('copy');
+    const oldText = btnCopy.textContent;
+    btnCopy.textContent = 'Copied!';
+    setTimeout(() => btnCopy.textContent = oldText, 2000);
+  });
+}
 
 // ---- Stats & State tracking ----
 const stats = {
@@ -202,10 +213,12 @@ function decodeLoop() {
     const dstPts = [anchors.TL, anchors.TR, anchors.BL, anchors.BR];
     const H = computeHomography(srcPts, dstPts);
 
-    if (H) {
-      // 9. Sample each cell — collect brightness first, then apply LOCAL threshold
+      if (H) {
+      // 9. Sample each cell's RGB values
       const numCells = GRID_SIZE * GRID_SIZE; // 1024
-      const cellBrightness = new Float64Array(numCells);
+      const cellR = new Float64Array(numCells);
+      const cellG = new Float64Array(numCells);
+      const cellB = new Float64Array(numCells);
       const cellPositions = [];
 
       // Adaptive sample radius based on pixels-per-unit
@@ -215,34 +228,61 @@ function decodeLoop() {
         const [idealX, idealY] = IDEAL_CELLS[i];
         const camPt = projectPoint(H, idealX, idealY);
         cellPositions.push(camPt);
-        cellBrightness[i] = sampleArea(gray, procW, procH, camPt.x, camPt.y, sampleR);
+        const rgb = sampleAreaRGB(imageData.data, procW, procH, camPt.x, camPt.y, sampleR);
+        cellR[i] = rgb.r;
+        cellG[i] = rgb.g;
+        cellB[i] = rgb.b;
       }
 
-      // LOCAL threshold: midpoint of min/max brightness across all cells.
-      let minB = 255, maxB = 0;
+      // LOCAL threshold per channel: midpoint of min/max brightness across all cells.
+      // This automatically adapts to colored lighting and screen white balance.
+      let minR = 255, maxR = 0, minG = 255, maxG = 0, minB = 255, maxB = 0;
       for (let i = 0; i < numCells; i++) {
-        if (cellBrightness[i] < minB) minB = cellBrightness[i];
-        if (cellBrightness[i] > maxB) maxB = cellBrightness[i];
+        if (cellR[i] < minR) minR = cellR[i];
+        if (cellR[i] > maxR) maxR = cellR[i];
+        if (cellG[i] < minG) minG = cellG[i];
+        if (cellG[i] > maxG) maxG = cellG[i];
+        if (cellB[i] < minB) minB = cellB[i];
+        if (cellB[i] > maxB) maxB = cellB[i];
       }
-      const cellThreshold = (minB + maxB) / 2;
+      
+      const threshR = (minR + maxR) / 2;
+      const threshG = (minG + maxG) / 2;
+      const threshB = (minB + maxB) / 2;
 
-      const bits = new Uint8Array(numCells);
+      const bitsR = new Uint8Array(numCells);
+      const bitsG = new Uint8Array(numCells);
+      const bitsB = new Uint8Array(numCells);
+      
       for (let i = 0; i < numCells; i++) {
-        bits[i] = cellBrightness[i] > cellThreshold ? 1 : 0;
+        // We use inverted threshold because sender uses 1 for color ON, and screen color is brighter than black
+        // Wait, screen color ON is BRIGHT (255), OFF is BLACK (0).
+        // So > thresh means 1.
+        bitsR[i] = cellR[i] > threshR ? 1 : 0;
+        bitsG[i] = cellG[i] > threshG ? 1 : 0;
+        bitsB[i] = cellB[i] > threshB ? 1 : 0;
       }
 
-      // 10. Convert bits to 128 bytes
-      const frameBytes = new Uint8Array(128);
+      // 10. Convert bits to 128 bytes per channel
+      const rBlock = new Uint8Array(128);
+      const gBlock = new Uint8Array(128);
+      const bBlock = new Uint8Array(128);
+      
       for (let i = 0; i < 128; i++) {
-        let byte = 0;
+        let byteR = 0, byteG = 0, byteB = 0;
         for (let bit = 0; bit < 8; bit++) {
-          byte = (byte << 1) | bits[i * 8 + bit];
+          const idx = i * 8 + bit;
+          byteR = (byteR << 1) | bitsR[idx];
+          byteG = (byteG << 1) | bitsG[idx];
+          byteB = (byteB << 1) | bitsB[idx];
         }
-        frameBytes[i] = byte;
+        rBlock[i] = byteR;
+        gBlock[i] = byteG;
+        bBlock[i] = byteB;
       }
 
-      // 11. Decode framing protocol
-      const frame = decodeFrame(frameBytes);
+      // 11. Decode framing protocol (3 channels)
+      const frame = decodeFrame(rBlock, gBlock, bBlock);
       stats.successFrames++; // Grid detected successfully
 
       if (frame.valid) {
