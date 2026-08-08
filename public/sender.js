@@ -6,9 +6,9 @@ const canvas = document.getElementById('gridCanvas');
 const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: false });
 const btnStart = document.getElementById('btnStart');
 const btnStop = document.getElementById('btnStop');
-const txtInput = document.getElementById('txtInput');
+const msgInput = document.getElementById('msgInput');
 const fileInput = document.getElementById('fileInput');
-const speedRange = document.getElementById('speedRange');
+const speedSlider = document.getElementById('speedSlider');
 const speedLabel = document.getElementById('speedLabel');
 
 // Config
@@ -36,7 +36,7 @@ let lastIdleColor = 0;
 let idleTimer = null;
 
 // UI Handlers
-speedRange.addEventListener('input', (e) => {
+speedSlider.addEventListener('input', (e) => {
   speedLabel.textContent = e.target.value + 'ms';
   if (isTransmitting) {
     clearInterval(txTimer);
@@ -66,7 +66,7 @@ btnStart.addEventListener('click', async () => {
     buffer.set(new Uint8Array(fileBuffer), 2 + metaBytes.length);
     currentFlags = FLAG_FILE_DATA;
   } else {
-    const text = txtInput.value.trim();
+    const text = msgInput.value.trim();
     if (!text) {
       alert("Enter text or select a file!");
       return;
@@ -82,11 +82,11 @@ btnStart.addEventListener('click', async () => {
   frameCount = 0;
   btnStart.disabled = true;
   btnStop.disabled = false;
-  txtInput.disabled = true;
+  msgInput.disabled = true;
   fileInput.disabled = true;
 
   clearInterval(idleTimer);
-  const ms = parseInt(speedRange.value, 10);
+  const ms = parseInt(speedSlider.value, 10);
   txTimer = setInterval(renderNextFrame, ms);
 });
 
@@ -95,7 +95,7 @@ btnStop.addEventListener('click', () => {
   clearInterval(txTimer);
   btnStart.disabled = false;
   btnStop.disabled = true;
-  txtInput.disabled = false;
+  msgInput.disabled = false;
   fileInput.disabled = false;
   startIdlePattern();
 });
