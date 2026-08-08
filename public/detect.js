@@ -468,89 +468,105 @@ window.sampleAreaRGB = sampleAreaRGB;
 
 /**
  * Main entry point for anchor detection.
- * Takes raw RGBA frame data and returns 4 corner anchor centers as
- * [{x,y}, {x,y}, {x,y}, {x,y}] in order [TL, TR, BR, BL],
+ * Returns [{x,y}, {x,y}, {x,y}, {x,y}] in order [TL, TR, BR, BL],
  * or null if detection fails.
  *
- * @param {Uint8ClampedArray} rgba
- * @param {number} width
- * @param {number} height
- * @returns {Array|null}
+ * Algorithm:
+ * 1. Grayscale → Otsu threshold → binarize (bright = anchor)
+ * 2. Find bright blobs, filter to plausible anchor sizes
+ * 3. Among blobs of similar size, pick 4 corner candidates using
+ *    centroid-relative position (most robust to false positives)
+ * 4. Validate the resulting quad
  */
 function detectGridAnchors(rgba, width, height) {
-  // 1. Grayscale + Otsu threshold
   const gray = toGrayscale(rgba, width * height);
   const thresh = otsuThreshold(gray);
   const binary = binarize(gray, thresh);
-
-  // 2. Find bright blobs (white anchor squares)
   const blobs = findBlobs(binary, width, height);
 
-  // 3. Filter to anchor-like blobs
   const frameDim = Math.min(width, height);
-  // Anchors are 8x8 cells. When grid fills 30-80% of frame they'd be
-  // roughly 2-15% of the frame dimension per side.
-  const minSide = frameDim * 0.02;
-  const maxSide = frameDim * 0.40;
+  const minSide = frameDim * 0.015;
+  const maxSide = frameDim * 0.35;
 
+  // Filter to plausible anchor-shaped blobs
   const candidates = blobs.filter(b => {
     const { w, h } = b.bbox;
     if (w < minSide || h < minSide) return false;
     if (w > maxSide || h > maxSide) return false;
     const aspect = w / h;
-    if (aspect < 0.3 || aspect > 3.0) return false;
-    if (b.solidity < 0.4) return false;
+    if (aspect < 0.25 || aspect > 4.0) return false;
+    if (b.solidity < 0.3) return false;
     return true;
   });
 
   if (candidates.length < 4) return null;
 
-  // 4. Pick the 4 largest candidates (by area)
+  // Sort by area descending
   candidates.sort((a, b) => b.area - a.area);
-  const top = candidates.slice(0, Math.min(candidates.length, 12));
 
-  // 5. Find the best quad — the 4 blobs that maximize enclosed area
-  let bestQuad = null;
-  let bestArea = 0;
+  // Find groups of similar-sized blobs (within 4x of each other)
+  // Try groups starting from the 4 largest, expanding if needed
+  let anchorGroup = null;
+  
+  for (let startSize = 0; startSize < Math.min(candidates.length - 3, 8); startSize++) {
+    const refArea = candidates[startSize].area;
+    const similar = candidates.filter(b =>
+      b.area >= refArea * 0.15 && b.area <= refArea * 6.0
+    );
+    if (similar.length >= 4) {
+      anchorGroup = similar.slice(0, Math.min(similar.length, 16));
+      break;
+    }
+  }
 
-  for (let a = 0; a < top.length - 3; a++) {
-    for (let b = a + 1; b < top.length - 2; b++) {
-      for (let c = b + 1; c < top.length - 1; c++) {
-        for (let d = c + 1; d < top.length; d++) {
-          const quad = [top[a], top[b], top[c], top[d]];
-          const area = quadArea(quad);
-          if (area > bestArea) {
-            bestArea = area;
-            bestQuad = quad;
-          }
-        }
+  if (!anchorGroup || anchorGroup.length < 4) return null;
+
+  // Compute centroid of all candidates in the group
+  const cx = anchorGroup.reduce((s, b) => s + b.cx, 0) / anchorGroup.length;
+  const cy = anchorGroup.reduce((s, b) => s + b.cy, 0) / anchorGroup.length;
+
+  // Assign each blob to a quadrant: TL, TR, BL, BR
+  // For each quadrant, pick the blob whose angle from centroid best matches that corner
+  // and is furthest from the centroid
+  const quadrants = [
+    { name: 'TL', angleTarget: Math.atan2(-1, -1), best: null, bestScore: -Infinity },
+    { name: 'TR', angleTarget: Math.atan2(-1,  1), best: null, bestScore: -Infinity },
+    { name: 'BR', angleTarget: Math.atan2( 1,  1), best: null, bestScore: -Infinity },
+    { name: 'BL', angleTarget: Math.atan2( 1, -1), best: null, bestScore: -Infinity },
+  ];
+
+  for (const b of anchorGroup) {
+    const angle = Math.atan2(b.cy - cy, b.cx - cx);
+    const dist = Math.hypot(b.cx - cx, b.cy - cy);
+
+    for (const q of quadrants) {
+      // Angular distance (handle wrap-around)
+      let da = Math.abs(angle - q.angleTarget);
+      if (da > Math.PI) da = 2 * Math.PI - da;
+      // Score: close in angle + far from centroid = good corner candidate
+      const score = dist - da * dist * 0.5;
+      if (da < Math.PI * 0.6 && score > q.bestScore) {
+        q.bestScore = score;
+        q.best = b;
       }
     }
   }
 
-  if (!bestQuad) return null;
+  const TL = quadrants[0].best;
+  const TR = quadrants[1].best;
+  const BR = quadrants[2].best;
+  const BL = quadrants[3].best;
 
-  // Minimum diagonal check — grid must fill 15% of frame at minimum
+  if (!TL || !TR || !BR || !BL) return null;
+
+  // Dedup check: all 4 must be distinct blobs
+  const chosen = new Set([TL, TR, BR, BL]);
+  if (chosen.size !== 4) return null;
+
+  // Validate: diagonal of the quad must be at least 15% of frame diagonal
+  const diagLen = Math.hypot(BR.cx - TL.cx, BR.cy - TL.cy);
   const frameDiag = Math.hypot(width, height);
-  const cx = bestQuad.reduce((s, p) => s + p.cx, 0) / 4;
-  const cy = bestQuad.reduce((s, p) => s + p.cy, 0) / 4;
-  let maxDist = 0;
-  for (const p of bestQuad) {
-    const d = Math.hypot(p.cx - cx, p.cy - cy);
-    if (d > maxDist) maxDist = d;
-  }
-  if (maxDist * 2 < frameDiag * 0.15) return null;
-
-  // 6. Sort to [TL, TR, BR, BL] by position
-  // TL: min(x+y), TR: min(y-x), BR: max(x+y), BL: max(y-x) proxies
-  const sorted = bestQuad.slice().sort((a, b) => (a.cx + a.cy) - (b.cx + b.cy));
-  const TL = sorted[0];
-  const BR = sorted[3];
-  const remaining = [sorted[1], sorted[2]];
-  // Of the two remaining, the one with smaller x is BL, larger x is TR
-  remaining.sort((a, b) => a.cx - b.cx);
-  const BL = remaining[0];
-  const TR = remaining[1];
+  if (diagLen < frameDiag * 0.12) return null;
 
   return [
     { x: TL.cx, y: TL.cy },
@@ -561,3 +577,4 @@ function detectGridAnchors(rgba, width, height) {
 }
 
 window.detectGridAnchors = detectGridAnchors;
+
