@@ -28,6 +28,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Push canvas below the controls bar (~90px tall) */
+  padding-top: 90px;
 }
 
 #gridCanvas {
