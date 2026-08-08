@@ -69,8 +69,8 @@ function otsuThreshold(gray) {
 // ---- Binarization ----
 
 /**
- * Binarize grayscale image: dark pixels → 1, light pixels → 0.
- * (We label dark pixels because anchors are dark.)
+ * Binarize grayscale image: BRIGHT pixels → 1, dark pixels → 0.
+ * (Anchors are bright white squares.)
  * @param {Uint8Array} gray
  * @param {number} threshold
  * @returns {Uint8Array} binary image (0 or 1 per pixel)
@@ -78,7 +78,7 @@ function otsuThreshold(gray) {
 function binarize(gray, threshold) {
   const bin = new Uint8Array(gray.length);
   for (let i = 0; i < gray.length; i++) {
-    bin[i] = gray[i] <= threshold ? 1 : 0;
+    bin[i] = gray[i] > threshold ? 1 : 0;
   }
   return bin;
 }
@@ -465,3 +465,99 @@ window.filterAnchors = filterAnchors;
 window.identifyAnchors = identifyAnchors;
 window.sampleArea = sampleArea;
 window.sampleAreaRGB = sampleAreaRGB;
+
+/**
+ * Main entry point for anchor detection.
+ * Takes raw RGBA frame data and returns 4 corner anchor centers as
+ * [{x,y}, {x,y}, {x,y}, {x,y}] in order [TL, TR, BR, BL],
+ * or null if detection fails.
+ *
+ * @param {Uint8ClampedArray} rgba
+ * @param {number} width
+ * @param {number} height
+ * @returns {Array|null}
+ */
+function detectGridAnchors(rgba, width, height) {
+  // 1. Grayscale + Otsu threshold
+  const gray = toGrayscale(rgba, width * height);
+  const thresh = otsuThreshold(gray);
+  const binary = binarize(gray, thresh);
+
+  // 2. Find bright blobs (white anchor squares)
+  const blobs = findBlobs(binary, width, height);
+
+  // 3. Filter to anchor-like blobs
+  const frameDim = Math.min(width, height);
+  // Anchors are 8x8 cells. When grid fills 30-80% of frame they'd be
+  // roughly 2-15% of the frame dimension per side.
+  const minSide = frameDim * 0.02;
+  const maxSide = frameDim * 0.40;
+
+  const candidates = blobs.filter(b => {
+    const { w, h } = b.bbox;
+    if (w < minSide || h < minSide) return false;
+    if (w > maxSide || h > maxSide) return false;
+    const aspect = w / h;
+    if (aspect < 0.3 || aspect > 3.0) return false;
+    if (b.solidity < 0.4) return false;
+    return true;
+  });
+
+  if (candidates.length < 4) return null;
+
+  // 4. Pick the 4 largest candidates (by area)
+  candidates.sort((a, b) => b.area - a.area);
+  const top = candidates.slice(0, Math.min(candidates.length, 12));
+
+  // 5. Find the best quad — the 4 blobs that maximize enclosed area
+  let bestQuad = null;
+  let bestArea = 0;
+
+  for (let a = 0; a < top.length - 3; a++) {
+    for (let b = a + 1; b < top.length - 2; b++) {
+      for (let c = b + 1; c < top.length - 1; c++) {
+        for (let d = c + 1; d < top.length; d++) {
+          const quad = [top[a], top[b], top[c], top[d]];
+          const area = quadArea(quad);
+          if (area > bestArea) {
+            bestArea = area;
+            bestQuad = quad;
+          }
+        }
+      }
+    }
+  }
+
+  if (!bestQuad) return null;
+
+  // Minimum diagonal check — grid must fill 15% of frame at minimum
+  const frameDiag = Math.hypot(width, height);
+  const cx = bestQuad.reduce((s, p) => s + p.cx, 0) / 4;
+  const cy = bestQuad.reduce((s, p) => s + p.cy, 0) / 4;
+  let maxDist = 0;
+  for (const p of bestQuad) {
+    const d = Math.hypot(p.cx - cx, p.cy - cy);
+    if (d > maxDist) maxDist = d;
+  }
+  if (maxDist * 2 < frameDiag * 0.15) return null;
+
+  // 6. Sort to [TL, TR, BR, BL] by position
+  // TL: min(x+y), TR: min(y-x), BR: max(x+y), BL: max(y-x) proxies
+  const sorted = bestQuad.slice().sort((a, b) => (a.cx + a.cy) - (b.cx + b.cy));
+  const TL = sorted[0];
+  const BR = sorted[3];
+  const remaining = [sorted[1], sorted[2]];
+  // Of the two remaining, the one with smaller x is BL, larger x is TR
+  remaining.sort((a, b) => a.cx - b.cx);
+  const BL = remaining[0];
+  const TR = remaining[1];
+
+  return [
+    { x: TL.cx, y: TL.cy },
+    { x: TR.cx, y: TR.cy },
+    { x: BR.cx, y: BR.cy },
+    { x: BL.cx, y: BL.cy },
+  ];
+}
+
+window.detectGridAnchors = detectGridAnchors;
