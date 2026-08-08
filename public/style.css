@@ -23,12 +23,22 @@ body {
   position: relative;
   width: 100vw;
   height: 100vh;
-  background: #fff;
+  background: #111;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 #gridCanvas {
   display: block;
+  /* Scale the 640x640 canvas to fit whatever viewport the user has, keeping aspect ratio */
+  max-width: 100vw;
+  max-height: 100vh;
+  width: auto;
+  height: auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 .sender-controls {
@@ -41,10 +51,11 @@ body {
   gap: 16px;
   font-size: 14px;
   z-index: 10;
-  background: rgba(0,0,0,0.65);
+  background: rgba(0,0,0,0.75);
   backdrop-filter: blur(6px);
   padding: 6px 16px;
   border-radius: 8px;
+  white-space: nowrap;
 }
 
 .sender-controls .hex {
