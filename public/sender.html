@@ -31,8 +31,10 @@
     </div>
   </div>
   <canvas id="gridCanvas"></canvas>
-  <script src="reedsolomon.js?v=4"></script>
-  <script src="protocol.js?v=4"></script>
-  <script src="sender.js?v=4"></script>
+  <!-- Load modules (order matters: reedsolomon, fountain, protocol, then sender) -->
+  <script src="reedsolomon.js?v=7"></script>
+  <script src="fountain.js?v=7"></script>
+  <script src="protocol.js?v=7"></script>
+  <script src="sender.js?v=7"></script>
 </body>
 </html>

@@ -1,58 +1,24 @@
 /**
- * receiver.js — Camera capture and grid decode pipeline.
- *
- * Captures video from the rear camera, processes each frame to detect
- * the Photon grid pattern, and displays decoded data + performance stats.
- *
- * Depends on: detect.js (toGrayscale, otsuThreshold, binarize, findBlobs,
- *             filterAnchors, identifyAnchors, sampleArea)
- *             homography.js (computeHomography, projectPoint)
+ * receiver.js — 64x64 RGB Grid + Fountain Code Decoder
  */
 
-// ---- Layout constants (must match sender.js) ----
-const GRID_SIZE = 32;
-const TOTAL_UNITS = 46;
-const GRID_ORIGIN_X = 7;
-const GRID_ORIGIN_Y = 7;
-
-// Ideal anchor centers in unit coordinates
-const IDEAL_ANCHORS = {
-  TL: [4, 4],
-  TR: [42, 4],
-  BL: [4, 42],
-  BR: [42, 42],
-};
-
-// Ideal cell centers
-const IDEAL_CELLS = [];
-for (let row = 0; row < GRID_SIZE; row++) {
-  for (let col = 0; col < GRID_SIZE; col++) {
-    IDEAL_CELLS.push([GRID_ORIGIN_X + col + 0.5, GRID_ORIGIN_Y + row + 0.5]);
-  }
-}
-
-// ---- Processing config ----
-const PROC_SCALE = 1.0; // Process at full camera resolution for 32x32 density
-const SAMPLE_RADIUS = 2; // Pixel radius for cell brightness sampling
-
-// ---- DOM elements ----
 const video = document.getElementById('cameraVideo');
 const overlay = document.getElementById('overlayCanvas');
-const overlayCtx = overlay.getContext('2d');
+const octx = overlay.getContext('2d');
 
-// Stats DOM
 const statStatus = document.getElementById('statStatus');
 const statFPS = document.getElementById('statFPS');
 const statRate = document.getElementById('statRate');
 const statThroughput = document.getElementById('statThroughput');
-const statProgress = document.getElementById('statProgress');
 const statErrors = document.getElementById('statErrors');
+const statProgress = document.getElementById('statProgress');
 const statAnchors = document.getElementById('statAnchors');
 const statPxCell = document.getElementById('statPxCell');
 const statMessage = document.getElementById('statMessage');
 const btnCopy = document.getElementById('btnCopy');
 const btnReset = document.getElementById('btnReset');
 const btnDownload = document.getElementById('btnDownload');
+const filePreviewContainer = document.getElementById('filePreviewContainer');
 
 if (btnCopy) {
   btnCopy.addEventListener('click', () => {
@@ -64,20 +30,19 @@ if (btnCopy) {
   });
 }
 
+let fountainDecoder = null;
+let currentFileToDownload = null;
+
 if (btnReset) {
   btnReset.addEventListener('click', () => {
-    receivedFrames.clear();
-    expectedTotalFrames = null;
-    firstValidFrameTime = null;
-    reassemblyComplete = false;
+    fountainDecoder = null;
     currentFileToDownload = null;
-    statMessage.value = 'Waiting for frames...';
+    statMessage.value = 'Waiting for droplets...';
     if (btnDownload) {
       btnDownload.style.display = 'none';
       btnDownload.href = '';
     }
-    const fileContainer = document.getElementById('filePreviewContainer');
-    if (fileContainer) fileContainer.innerHTML = '';
+    if (filePreviewContainer) filePreviewContainer.innerHTML = '';
   });
 }
 
@@ -114,10 +79,8 @@ if (btnDownload) {
     }
     
     // 3. Bulletproof Fallback (iOS Brave/Chrome)
-    // Render the file to the screen directly so the user can long-press to save
-    const fileContainer = document.getElementById('filePreviewContainer');
-    if (fileContainer) {
-      fileContainer.innerHTML = '';
+    if (filePreviewContainer) {
+      filePreviewContainer.innerHTML = '';
       if (currentFileToDownload.type.startsWith('image/')) {
         const reader = new FileReader();
         reader.onload = (ev) => {
@@ -126,7 +89,7 @@ if (btnDownload) {
           img.style.maxWidth = '100%';
           img.style.border = '2px solid #39f';
           img.style.borderRadius = '8px';
-          fileContainer.appendChild(img);
+          filePreviewContainer.appendChild(img);
           alert("Image displayed! Long-press on the image below to save it.");
         };
         reader.readAsDataURL(currentFileToDownload);
@@ -139,7 +102,7 @@ if (btnDownload) {
           txt.rows = 8;
           txt.style.background = '#222';
           txt.style.color = '#fff';
-          fileContainer.appendChild(txt);
+          filePreviewContainer.appendChild(txt);
           alert("File contents displayed below.");
         };
         reader.readAsText(currentFileToDownload);
@@ -151,443 +114,236 @@ if (btnDownload) {
 // ---- Stats & State tracking ----
 const stats = {
   totalFrames: 0,
-  successFrames: 0, // Successfully detected grid
-  validFrames: 0,   // CRC passed
+  successFrames: 0,
   totalErrorsCorrected: 0,
-  fpsFrames: 0,
-  fpsStart: performance.now(),
-  currentFPS: 0,
-  lastAnchors: null,
-  lastCells: null,
-  lastPixelsPerCellNative: 0,
+  validFrames: 0
 };
 
-// Reassembly state
-let receivedFrames = new Map();
-let expectedTotalFrames = null;
-let firstValidFrameTime = null;
-let reassemblyComplete = false;
-let currentFileToDownload = null;
-
-// ---- Processing canvas (offscreen) ----
 let procCanvas = null;
 let procCtx = null;
-let procW = 0, procH = 0;
-let nativeW = 0, nativeH = 0;
+let lastTime = performance.now();
+let frameTimes = [];
 
-// ---- Camera setup ----
-
+// Initialize Camera
 async function initCamera() {
-  statStatus.textContent = 'Requesting camera…';
-
   try {
-    // Try to lock landscape (may fail without fullscreen, that's OK)
-    if (screen.orientation && screen.orientation.lock) {
-      screen.orientation.lock('landscape').catch(() => {});
-    }
-
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      },
-      audio: false,
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
     });
-
     video.srcObject = stream;
-    await video.play();
-
-    // Wait for video dimensions to be available
-    await new Promise((resolve) => {
-      if (video.videoWidth > 0) return resolve();
-      video.addEventListener('loadedmetadata', resolve, { once: true });
+    
+    video.addEventListener('play', () => {
+      overlay.width = video.videoWidth;
+      overlay.height = video.videoHeight;
+      procCanvas = document.createElement('canvas');
+      procCanvas.width = video.videoWidth;
+      procCanvas.height = video.videoHeight;
+      procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
+      requestAnimationFrame(processFrame);
     });
-
-    nativeW = video.videoWidth;
-    nativeH = video.videoHeight;
-    procW = Math.round(nativeW * PROC_SCALE);
-    procH = Math.round(nativeH * PROC_SCALE);
-
-    // Create offscreen processing canvas
-    procCanvas = document.createElement('canvas');
-    procCanvas.width = procW;
-    procCanvas.height = procH;
-    procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
-
-    // Size the overlay canvas to match the video display
-    resizeOverlay();
-
-    statStatus.textContent = `Camera: ${nativeW}×${nativeH} → proc: ${procW}×${procH}`;
-    statStatus.className = 'value';
-
-    console.log(`Camera initialized: ${nativeW}×${nativeH}, processing at ${procW}×${procH}`);
-
-    // Start decode loop
-    requestAnimationFrame(decodeLoop);
   } catch (err) {
-    statStatus.textContent = `Camera error: ${err.message}`;
-    statStatus.className = 'value error';
-    console.error('Camera init failed:', err);
+    statStatus.textContent = "Camera error: " + err.message;
   }
 }
 
-function resizeOverlay() {
-  overlay.width = overlay.clientWidth;
-  overlay.height = overlay.clientHeight;
-}
-window.addEventListener('resize', resizeOverlay);
-
-// ---- Main decode loop ----
-
-function decodeLoop() {
-  if (video.readyState < video.HAVE_CURRENT_DATA) {
-    requestAnimationFrame(decodeLoop);
+function processFrame(now) {
+  if (video.paused || video.ended) {
+    requestAnimationFrame(processFrame);
     return;
   }
 
-  const t0 = performance.now();
+  // FPS calculation
+  const dt = now - lastTime;
+  lastTime = now;
+  frameTimes.push(dt);
+  if (frameTimes.length > 30) frameTimes.shift();
+  const avgDt = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
+  statFPS.textContent = (1000 / avgDt).toFixed(1);
+
   stats.totalFrames++;
 
-  // 1. Draw video frame to processing canvas (downsampled)
-  procCtx.drawImage(video, 0, 0, procW, procH);
-  const imageData = procCtx.getImageData(0, 0, procW, procH);
-  const pixelCount = procW * procH;
+  // Draw video to processing canvas
+  procCtx.drawImage(video, 0, 0, procCanvas.width, procCanvas.height);
+  const imageData = procCtx.getImageData(0, 0, procCanvas.width, procCanvas.height);
+  const rgba = imageData.data;
 
-  // 2. Grayscale
-  const gray = toGrayscale(imageData.data, pixelCount);
+  // Clear overlay
+  octx.clearRect(0, 0, overlay.width, overlay.height);
 
-  // 3. Otsu threshold
-  const threshold = otsuThreshold(gray);
+  // 1. Detect Grid
+  const pts = detectGridAnchors(rgba, procCanvas.width, procCanvas.height);
+  
+  if (pts && pts.length === 4) {
+    statStatus.textContent = "Locked / Receiving";
+    statStatus.style.color = "#0f0";
+    statAnchors.textContent = "Found 4";
 
-  // 4. Binarize
-  const binary = binarize(gray, threshold);
+    // 2. Compute Homography
+    const H = computeHomography(
+      0, 0,
+      GRID_SIZE, 0,
+      GRID_SIZE, GRID_SIZE,
+      0, GRID_SIZE,
+      pts[0].x, pts[0].y,
+      pts[1].x, pts[1].y,
+      pts[2].x, pts[2].y,
+      pts[3].x, pts[3].y
+    );
 
-  // 5. Find blobs
-  const blobs = findBlobs(binary, procW, procH);
-
-  // 6. Filter anchor candidates
-  const candidates = filterAnchors(blobs, procW, procH);
-
-  // 7. Identify the 4 anchors
-  const anchorsRaw = identifyAnchors(candidates, procW, procH);
-
-  // Temporal smoothing: reject detections that jump wildly from the previous frame.
-  // This prevents single-frame glitches where data cells form false quads.
-  let anchors = anchorsRaw;
-  if (anchors && stats.lastAnchors) {
-    const prevCenter = [
-      (stats.lastAnchors.TL[0] + stats.lastAnchors.BR[0]) / 2,
-      (stats.lastAnchors.TL[1] + stats.lastAnchors.BR[1]) / 2,
-    ];
-    const newCenter = [
-      (anchors.TL[0] + anchors.BR[0]) / 2,
-      (anchors.TL[1] + anchors.BR[1]) / 2,
-    ];
-    const jump = Math.hypot(newCenter[0] - prevCenter[0], newCenter[1] - prevCenter[1]);
-    const frameDiag = Math.hypot(procW, procH);
-    // If center jumped more than 20% of frame diagonal, reject this frame's detection
-    if (jump > frameDiag * 0.20) {
-      anchors = stats.lastAnchors; // reuse previous stable anchors
-    }
-  }
-
-  let decoded = null;
-
-  if (anchors) {
-    // 8. Compute homography (ideal → processing coords)
-    const srcPts = [IDEAL_ANCHORS.TL, IDEAL_ANCHORS.TR, IDEAL_ANCHORS.BL, IDEAL_ANCHORS.BR];
-    const dstPts = [anchors.TL, anchors.TR, anchors.BL, anchors.BR];
-    const H = computeHomography(srcPts, dstPts);
-
-      if (H) {
-      // 9. Sample each cell's RGB values
-      const numCells = GRID_SIZE * GRID_SIZE; // 1024
+    if (H) {
+      // 3. Sample RGB cells
+      const numCells = GRID_SIZE * GRID_SIZE;
       const cellR = new Float64Array(numCells);
       const cellG = new Float64Array(numCells);
       const cellB = new Float64Array(numCells);
-      const cellPositions = [];
-
-      // Adaptive sample radius based on pixels-per-unit
-      const sampleR = Math.max(1, Math.round(anchors.pixelsPerUnit * 0.2));
-
-      for (let i = 0; i < numCells; i++) {
-        const [idealX, idealY] = IDEAL_CELLS[i];
-        const camPt = projectPoint(H, idealX, idealY);
-        cellPositions.push(camPt);
-        const rgb = sampleAreaRGB(imageData.data, procW, procH, camPt.x, camPt.y, sampleR);
-        cellR[i] = rgb.r;
-        cellG[i] = rgb.g;
-        cellB[i] = rgb.b;
-      }
-
-      // LOCAL threshold per channel: midpoint of min/max brightness across all cells.
-      // This automatically adapts to colored lighting and screen white balance.
+      
+      let samplePoints = [];
       let minR = 255, maxR = 0, minG = 255, maxG = 0, minB = 255, maxB = 0;
-      for (let i = 0; i < numCells; i++) {
-        if (cellR[i] < minR) minR = cellR[i];
-        if (cellR[i] > maxR) maxR = cellR[i];
-        if (cellG[i] < minG) minG = cellG[i];
-        if (cellG[i] > maxG) maxG = cellG[i];
-        if (cellB[i] < minB) minB = cellB[i];
-        if (cellB[i] > maxB) maxB = cellB[i];
+
+      for (let i = 0; i < dataCellCoords.length; i++) {
+        const { x, y } = dataCellCoords[i];
+        
+        // Map from grid (x+0.5, y+0.5) to image coordinates
+        const u = x + 0.5;
+        const v = y + 0.5;
+        
+        const w = H[6]*u + H[7]*v + 1;
+        const imgX = (H[0]*u + H[1]*v + H[2]) / w;
+        const imgY = (H[3]*u + H[4]*v + H[5]) / w;
+
+        // Draw sampling points on overlay for debugging
+        if (i % 30 === 0) { // draw a subset to save performance
+          samplePoints.push({x: imgX, y: imgY});
+        }
+
+        // We use a small 1-pixel radius for 64x64 to avoid bleeding
+        const [R, G, B] = sampleAreaRGB(rgba, procCanvas.width, procCanvas.height, imgX, imgY, 1);
+        
+        cellR[i] = R;
+        cellG[i] = G;
+        cellB[i] = B;
+
+        if (R < minR) minR = R; if (R > maxR) maxR = R;
+        if (G < minG) minG = G; if (G > maxG) maxG = G;
+        if (B < minB) minB = B; if (B > maxB) maxB = B;
       }
+
+      // Draw sample points
+      octx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+      for (const p of samplePoints) {
+        octx.fillRect(p.x - 1, p.y - 1, 2, 2);
+      }
+
+      // 4. Thresholding (Adaptive per channel)
+      const rBlock = new Uint8Array(BYTES_PER_CHANNEL);
+      const gBlock = new Uint8Array(BYTES_PER_CHANNEL);
+      const bBlock = new Uint8Array(BYTES_PER_CHANNEL);
       
       const threshR = (minR + maxR) / 2;
       const threshG = (minG + maxG) / 2;
       const threshB = (minB + maxB) / 2;
 
-      const bitsR = new Uint8Array(numCells);
-      const bitsG = new Uint8Array(numCells);
-      const bitsB = new Uint8Array(numCells);
-      
-      for (let i = 0; i < numCells; i++) {
-        // We use inverted threshold because sender uses 1 for color ON, and screen color is brighter than black
-        // Wait, screen color ON is BRIGHT (255), OFF is BLACK (0).
-        // So > thresh means 1.
-        bitsR[i] = cellR[i] > threshR ? 1 : 0;
-        bitsG[i] = cellG[i] > threshG ? 1 : 0;
-        bitsB[i] = cellB[i] > threshB ? 1 : 0;
+      for (let i = 0; i < dataCellCoords.length; i++) {
+        const bitR = cellR[i] > threshR ? 1 : 0;
+        const bitG = cellG[i] > threshG ? 1 : 0;
+        const bitB = cellB[i] > threshB ? 1 : 0;
+
+        const byteIdx = Math.floor(i / 8);
+        const bitIdx = 7 - (i % 8);
+
+        rBlock[byteIdx] |= (bitR << bitIdx);
+        gBlock[byteIdx] |= (bitG << bitIdx);
+        bBlock[byteIdx] |= (bitB << bitIdx);
       }
 
-      // 10. Convert bits to 128 bytes per channel
-      const rBlock = new Uint8Array(128);
-      const gBlock = new Uint8Array(128);
-      const bBlock = new Uint8Array(128);
-      
-      for (let i = 0; i < 128; i++) {
-        let byteR = 0, byteG = 0, byteB = 0;
-        for (let bit = 0; bit < 8; bit++) {
-          const idx = i * 8 + bit;
-          byteR = (byteR << 1) | bitsR[idx];
-          byteG = (byteG << 1) | bitsG[idx];
-          byteB = (byteB << 1) | bitsB[idx];
-        }
-        rBlock[i] = byteR;
-        gBlock[i] = byteG;
-        bBlock[i] = byteB;
-      }
-
-      // 11. Decode framing protocol (3 channels)
+      // 5. Decode Frame
       const frame = decodeFrame(rBlock, gBlock, bBlock);
-      stats.successFrames++; // Grid detected successfully
+      stats.successFrames++;
 
       if (frame.valid) {
-        if (stats.validFrames === 0) firstValidFrameTime = performance.now();
         stats.validFrames++;
         stats.totalErrorsCorrected += frame.errorsCorrected;
         
-        if (!receivedFrames.has(frame.seq)) {
-          receivedFrames.set(frame.seq, frame);
-        }
-        if (frame.isEof) {
-          expectedTotalFrames = frame.seq + 1;
-        }
-
-        // Check if we have all frames
-        if (expectedTotalFrames !== null && receivedFrames.size === expectedTotalFrames && !reassemblyComplete) {
-          reassemblyComplete = true;
-          // Concatenate all payloads
-          const sortedSeq = Array.from(receivedFrames.keys()).sort((a, b) => a - b);
-          let totalLen = 0;
-          for (let s of sortedSeq) totalLen += receivedFrames.get(s).payload.length;
-          
-          const fullPayload = new Uint8Array(totalLen);
-          let offset = 0;
-          for (let s of sortedSeq) {
-            const p = receivedFrames.get(s).payload;
-            fullPayload.set(p, offset);
-            offset += p.length;
-          }
-          
-          // Check flags from the first frame to see if it's a file transfer
-          const firstFrame = receivedFrames.get(0);
-          if (firstFrame && firstFrame.flags === 1 /* FLAG_FILE_META */) {
-            try {
-              // Parse metadata
-              const metaLen = firstFrame.payload.length;
-              const metaJson = new TextDecoder().decode(firstFrame.payload);
-              const meta = JSON.parse(metaJson);
-              
-              // The rest of the payload is file data (flags === 2)
-              const fileData = fullPayload.slice(metaLen);
-              currentFileToDownload = new File([fileData], meta.name, { type: meta.type || 'application/octet-stream' });
-              
-              statMessage.value = `[File Transfer Complete]\nName: ${meta.name}\nSize: ${(meta.size / 1024).toFixed(1)} KB\nType: ${meta.type || 'unknown'}`;
-              
-              const btnDownload = document.getElementById('btnDownload');
-              if (btnDownload) {
-                btnDownload.style.display = 'block';
-                btnDownload.href = 'javascript:void(0)';
-                btnDownload.removeAttribute('download');
-              }
-            } catch (e) {
-              statMessage.value = "Failed to parse file metadata: " + e.message;
-            }
-          } else {
-            // Regular text message
-            const msg = new TextDecoder().decode(fullPayload);
-            statMessage.value = msg;
-          }
-        }
-        decoded = true;
+        handleDecodedFrame(frame);
       }
-
-      stats.lastAnchors = anchors;
-      stats.lastCells = cellPositions;
-
-      // Compute pixels-per-cell in NATIVE camera resolution
-      stats.lastPixelsPerCellNative = anchors.pixelsPerUnit / PROC_SCALE;
+      
+      // Update basic stats
+      const rate = ((stats.validFrames / stats.successFrames) * 100).toFixed(1);
+      statRate.textContent = `${rate}% (${stats.validFrames}/${stats.successFrames})`;
+      statErrors.textContent = stats.totalErrorsCorrected;
+      
+      // Compute pixel per cell
+      const w = H[6]*GRID_SIZE + H[7]*GRID_SIZE + 1;
+      const dX = (H[0]*GRID_SIZE + H[1]*GRID_SIZE + H[2]) / w - (H[2]);
+      const dY = (H[3]*GRID_SIZE + H[4]*GRID_SIZE + H[5]) / w - (H[5]);
+      const dist = Math.sqrt(dX*dX + dY*dY);
+      statPxCell.textContent = (dist / GRID_SIZE).toFixed(1);
     }
-  }
-
-  // ---- Update FPS counter ----
-  stats.fpsFrames++;
-  const elapsed = performance.now() - stats.fpsStart;
-  if (elapsed >= 1000) {
-    stats.currentFPS = (stats.fpsFrames / elapsed * 1000).toFixed(1);
-    stats.fpsFrames = 0;
-    stats.fpsStart = performance.now();
-  }
-
-  // ---- Update stats display ----
-  statFPS.textContent = stats.currentFPS || '—';
-  statRate.textContent = stats.totalFrames > 0
-    ? `${((stats.successFrames / stats.totalFrames) * 100).toFixed(1)}% (${stats.successFrames}/${stats.totalFrames}) grid detected`
-    : '—';
-    
-  // Calculate throughput
-  if (firstValidFrameTime && stats.validFrames > 0) {
-    const elapsedSec = (performance.now() - firstValidFrameTime) / 1000;
-    // Assuming 96 payload bytes per valid frame (32x32 layout)
-    const bytesReceived = stats.validFrames * 96;
-    statThroughput.textContent = elapsedSec > 0.5 ? `${Math.round(bytesReceived / elapsedSec)} B/s` : '—';
   } else {
-    statThroughput.textContent = '—';
+    statStatus.textContent = "Searching for grid...";
+    statStatus.style.color = "#888";
+    statAnchors.textContent = pts ? `Found ${pts.length}/4` : "Found 0/4";
   }
 
-  statErrors.textContent = stats.totalErrorsCorrected > 0 ? stats.totalErrorsCorrected : '0';
+  requestAnimationFrame(processFrame);
+}
 
+function handleDecodedFrame(frame) {
+  // Reset or instantiate Fountain Decoder if K changes or doesn't exist
+  if (!fountainDecoder || fountainDecoder.K !== frame.numChunks) {
+    fountainDecoder = new FountainDecoder(frame.numChunks, MAX_PAYLOAD, frame.numChunks * MAX_PAYLOAD);
+    statMessage.value = "Starting fountain transfer...\n";
+  }
+  
+  if (fountainDecoder.isComplete()) return;
+
+  const completeNow = fountainDecoder.addDroplet(frame.seed, frame.payload);
+  
   // Progress
-  statProgress.textContent = expectedTotalFrames !== null
-    ? `${receivedFrames.size} / ${expectedTotalFrames} frames`
-    : `${receivedFrames.size} / ? frames`;
-  
-  if (reassemblyComplete) {
-    statProgress.textContent += ' (Complete ✓)';
-    statProgress.className = 'value';
-  }
+  const pct = Math.floor((fountainDecoder.solvedCount / fountainDecoder.K) * 100);
+  statProgress.textContent = `${fountainDecoder.solvedCount} / ${fountainDecoder.K} chunks (${pct}%)`;
 
-  statAnchors.textContent = anchors
-    ? `4/4 found ✓`
-    : `Found ${candidates.length}/4 (Frame entire grid!)`;
-  statAnchors.className = anchors ? 'value' : 'value warn';
-  statPxCell.textContent = stats.lastPixelsPerCellNative > 0
-    ? stats.lastPixelsPerCellNative.toFixed(1)
-    : '—';
+  // Calculate Throughput (roughly: dropletsReceived / time)
+  // But we'll just show droplets received so far.
+  statThroughput.textContent = `${fountainDecoder.dropletsReceived} total droplets processed`;
 
-  if (decoded) {
-    statStatus.textContent = 'Decoding frames ✓';
-    statStatus.className = 'value';
-  } else {
-    statStatus.textContent = anchors ? 'CRC failed' : 'Searching for grid…';
-    statStatus.className = anchors ? 'value warn' : 'value';
-  }
-
-  // ---- Debug overlay ----
-  drawOverlay(anchors, stats.lastCells);
-
-  // ---- Schedule next frame ----
-  requestAnimationFrame(decodeLoop);
-}
-
-// ---- Debug overlay drawing ----
-
-function drawOverlay(anchors, cells) {
-  const w = overlay.width;
-  const h = overlay.height;
-  if (w === 0 || h === 0) return;
-
-  overlayCtx.clearRect(0, 0, w, h);
-
-  if (!anchors) {
-    // Draw a gentle framing guide when searching
-    overlayCtx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-    overlayCtx.lineWidth = 2;
-    const guideSize = Math.min(w, h) * 0.7;
-    overlayCtx.strokeRect((w - guideSize) / 2, (h - guideSize) / 2, guideSize, guideSize);
+  if (completeNow) {
+    statProgress.textContent += " (Complete ✓)";
+    statProgress.style.color = "#0f0";
     
-    overlayCtx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-    overlayCtx.font = '14px sans-serif';
-    overlayCtx.textAlign = 'center';
-    overlayCtx.fillText('Point at the entire grid', w / 2, (h - guideSize) / 2 - 10);
-    return;
-  }
-
-  // Compute scale and offset to match CSS object-fit: cover
-  const videoAspect = nativeW / nativeH;
-  const screenAspect = w / h;
-  
-  let scale, offX, offY;
-  if (videoAspect > screenAspect) {
-    // Video is wider, scaled by height
-    scale = h / procH;
-    offX = (w - procW * scale) / 2;
-    offY = 0;
-  } else {
-    // Video is taller, scaled by width
-    scale = w / procW;
-    offX = 0;
-    offY = (h - procH * scale) / 2;
-  }
-
-  const toScreenX = (x) => x * scale + offX;
-  const toScreenY = (y) => y * scale + offY;
-
-  // Draw quadrilateral connecting anchors
-  const pts = [anchors.TL, anchors.TR, anchors.BR, anchors.BL]; // clockwise
-  overlayCtx.strokeStyle = 'rgba(0, 255, 0, 0.7)';
-  overlayCtx.lineWidth = 2;
-  overlayCtx.beginPath();
-  overlayCtx.moveTo(toScreenX(pts[0][0]), toScreenY(pts[0][1]));
-  for (let i = 1; i < 4; i++) {
-    overlayCtx.lineTo(toScreenX(pts[i][0]), toScreenY(pts[i][1]));
-  }
-  overlayCtx.closePath();
-  overlayCtx.stroke();
-
-  // Draw anchor markers
-  const labels = ['TL', 'TR', 'BR', 'BL'];
-  const colors = ['#0f0', '#0f0', '#f80', '#0f0']; // BR in orange (hollow)
-  for (let i = 0; i < 4; i++) {
-    const x = toScreenX(pts[i][0]);
-    const y = toScreenY(pts[i][1]);
-
-    overlayCtx.fillStyle = colors[i];
-    overlayCtx.beginPath();
-    overlayCtx.arc(x, y, 6, 0, Math.PI * 2);
-    overlayCtx.fill();
-
-    overlayCtx.fillStyle = '#fff';
-    overlayCtx.font = '11px monospace';
-    overlayCtx.fillText(labels[i], x + 9, y - 4);
-  }
-
-  // Draw cell sample positions
-  if (cells) {
-    overlayCtx.fillStyle = 'rgba(255, 255, 0, 0.5)';
-    for (const pt of cells) {
-      const x = toScreenX(pt.x);
-      const y = toScreenY(pt.y);
-      overlayCtx.beginPath();
-      overlayCtx.arc(x, y, 2, 0, Math.PI * 2);
-      overlayCtx.fill();
+    // Reassemble full buffer
+    const fullBuffer = fountainDecoder.getResult();
+    
+    if (frame.flags === FLAG_TEXT) {
+      // Decode as text, trim null bytes
+      let str = new TextDecoder().decode(fullBuffer);
+      str = str.replace(/\0/g, ''); // strip null padding
+      statMessage.value = str;
+    } else if (frame.flags === FLAG_FILE_DATA) {
+      try {
+        // Parse metadata header
+        const metaLen = (fullBuffer[0] << 8) | fullBuffer[1];
+        const metaBytes = fullBuffer.slice(2, 2 + metaLen);
+        const metaStr = new TextDecoder().decode(metaBytes);
+        const meta = JSON.parse(metaStr);
+        
+        // Extract raw file data
+        const fileData = fullBuffer.slice(2 + metaLen, 2 + metaLen + meta.size);
+        currentFileToDownload = new File([fileData], meta.name, { type: meta.type || 'application/octet-stream' });
+        
+        statMessage.value = `[File Transfer Complete]\nName: ${meta.name}\nSize: ${(meta.size / 1024).toFixed(1)} KB\nType: ${meta.type || 'unknown'}`;
+        
+        if (btnDownload) {
+          btnDownload.style.display = 'block';
+          btnDownload.href = 'javascript:void(0)';
+          btnDownload.removeAttribute('download');
+        }
+      } catch (err) {
+        statMessage.value = "Failed to parse file metadata: " + err.message;
+      }
     }
   }
 }
 
-// ---- Landing page / index redirect ----
-// (not needed, receiver.html is accessed directly)
-
-// ---- Start ----
+// Start
 initCamera();

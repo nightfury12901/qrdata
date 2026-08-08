@@ -1,169 +1,126 @@
-// Photon Framing Protocol — RGB Mode
-// Each frame uses 3 independent RS blocks (R, G, B channels).
-// This gives independent error correction per color channel.
+// protocol.js
+// 64x64 Grid with LT Fountain Codes & Reed-Solomon Erasure handling
 
-// CRC-8 calculation (polynomial 0x07)
-function crc8(data) {
-  let crc = 0;
-  for (let i = 0; i < data.length; i++) {
-    crc ^= data[i];
-    for (let j = 0; j < 8; j++) {
-      if (crc & 0x80) {
-        crc = (crc << 1) ^ 0x07;
-      } else {
-        crc <<= 1;
-      }
-    }
-  }
-  return crc & 0xFF;
-}
+const GRID_SIZE = 64;
+const TOTAL_UNITS = GRID_SIZE * GRID_SIZE;
 
-// ---- Layout constants ----
-const BLOCK_SIZE = 128;        // bytes per RS block (1024 cells / 8 bits)
-const ECC_SIZE = 28;           // RS parity bytes per block
-const DATA_PER_BLOCK = BLOCK_SIZE - ECC_SIZE; // 100 data bytes per block
-const NUM_CHANNELS = 3;        // R, G, B
-const TOTAL_DATA = DATA_PER_BLOCK * NUM_CHANNELS; // 300 bytes total data
-const HEADER_SIZE = 5;         // seq(2) + length(2) + flags(1)
-const FOOTER_SIZE = 1;         // CRC-8
-const MAX_PAYLOAD_SIZE = TOTAL_DATA - HEADER_SIZE - FOOTER_SIZE; // 294 bytes
+// 8x8 anchors in the 4 corners
+const ANCHOR_SIZE = 8;
+const ANCHOR_CELLS = 4 * (ANCHOR_SIZE * ANCHOR_SIZE); // 256 cells
+const DATA_CELLS = TOTAL_UNITS - ANCHOR_CELLS; // 3840 cells
+const BYTES_PER_CHANNEL = DATA_CELLS / 8; // 480 bytes
 
-// Protocol Flags
+// We split each 480-byte channel into 2 RS blocks of 240 bytes
+const RS_BLOCK_SIZE = 240;
+const RS_ECC_SIZE = 40;
+const RS_DATA_SIZE = 200;
+
+// Total capacity across R, G, B (each has 2 blocks of 200 data bytes)
+const FRAME_CAPACITY = 3 * 2 * RS_DATA_SIZE; // 1200 bytes
+
 const FLAG_TEXT = 0;
 const FLAG_FILE_META = 1;
 const FLAG_FILE_DATA = 2;
 
-let rsEncoder = null;
-let rsDecoder = null;
+// Header size
+const HEADER_SIZE = 8;
+const MAX_PAYLOAD = FRAME_CAPACITY - HEADER_SIZE; // 1192 bytes
 
-function initRS() {
-  if (rsEncoder) return;
-  if (typeof RS !== 'undefined') {
-    const field = RS.GenericGF.QR_CODE_FIELD_256();
-    rsEncoder = new RS.ReedSolomonEncoder(field);
-    rsDecoder = new RS.ReedSolomonDecoder(field);
-  } else {
-    throw new Error("RS library not loaded");
+function isAnchor(x, y) {
+  return (
+    (x < ANCHOR_SIZE && y < ANCHOR_SIZE) ||
+    (x >= GRID_SIZE - ANCHOR_SIZE && y < ANCHOR_SIZE) ||
+    (x < ANCHOR_SIZE && y >= GRID_SIZE - ANCHOR_SIZE) ||
+    (x >= GRID_SIZE - ANCHOR_SIZE && y >= GRID_SIZE - ANCHOR_SIZE)
+  );
+}
+
+// Generate the sequence of (x, y) coords for data cells
+const dataCellCoords = [];
+for (let y = 0; y < GRID_SIZE; y++) {
+  for (let x = 0; x < GRID_SIZE; x++) {
+    if (!isAnchor(x, y)) {
+      dataCellCoords.push({ x, y });
+    }
   }
 }
 
 /**
- * Encodes a frame of data into 3 RS-encoded blocks (one per color channel).
- * @param {number} seq - Sequence number (0-32767)
- * @param {boolean} isEof - True if this is the last frame
- * @param {number} flags - Protocol flags (0=text, 1=file meta, 2=file data)
- * @param {Uint8Array} payload - Up to MAX_PAYLOAD_SIZE bytes
- * @returns {Uint8Array[]} - Array of 3 blocks [R, G, B], each 128 bytes
+ * Encode a fountain droplet or standard message into 3 color channels.
+ * @param {number} flags - 0, 1, 2
+ * @param {number} seed - LT droplet seed
+ * @param {number} numChunks - K
+ * @param {Uint8Array} payload - the droplet data
  */
-function encodeFrame(seq, isEof, flags, payload) {
-  initRS();
-  if (payload.length > MAX_PAYLOAD_SIZE) {
-    throw new Error(`Payload too large: ${payload.length} > ${MAX_PAYLOAD_SIZE}`);
+function encodeFrame(flags, seed, numChunks, payload) {
+  const frameData = new Uint8Array(FRAME_CAPACITY);
+  frameData[0] = flags;
+  frameData[1] = (seed >> 8) & 0xff;
+  frameData[2] = seed & 0xff;
+  frameData[3] = (numChunks >> 8) & 0xff;
+  frameData[4] = numChunks & 0xff;
+  
+  if (payload) {
+    frameData.set(payload, HEADER_SIZE);
   }
 
-  // Build 300-byte data buffer
-  const data = new Uint8Array(TOTAL_DATA);
-
-  // Fill with random bytes for visual noise (prevents large single-color regions)
-  for (let i = HEADER_SIZE; i < TOTAL_DATA - FOOTER_SIZE; i++) {
-    data[i] = Math.floor(Math.random() * 256);
+  // Split into 6 blocks of 200 bytes
+  const rsBlocks = [];
+  for (let i = 0; i < 6; i++) {
+    const blockData = frameData.slice(i * RS_DATA_SIZE, (i + 1) * RS_DATA_SIZE);
+    rsBlocks.push(rsEncode(blockData, RS_ECC_SIZE)); // 240 bytes
   }
 
-  // Header: seq (15 bits) + EOF flag (MSB of byte 1)
-  const seqWithEof = (seq & 0x7FFF) | (isEof ? 0x8000 : 0);
-  data[0] = seqWithEof & 0xFF;
-  data[1] = (seqWithEof >> 8) & 0xFF;
+  // Combine into R, G, B channels
+  const rChannel = new Uint8Array(BYTES_PER_CHANNEL);
+  rChannel.set(rsBlocks[0], 0);
+  rChannel.set(rsBlocks[1], RS_BLOCK_SIZE);
 
-  // Length (2 bytes, little-endian)
-  data[2] = payload.length & 0xFF;
-  data[3] = (payload.length >> 8) & 0xFF;
+  const gChannel = new Uint8Array(BYTES_PER_CHANNEL);
+  gChannel.set(rsBlocks[2], 0);
+  gChannel.set(rsBlocks[3], RS_BLOCK_SIZE);
 
-  // Flags
-  data[4] = flags & 0xFF;
+  const bChannel = new Uint8Array(BYTES_PER_CHANNEL);
+  bChannel.set(rsBlocks[4], 0);
+  bChannel.set(rsBlocks[5], RS_BLOCK_SIZE);
 
-  // Payload
-  data.set(payload, HEADER_SIZE);
-
-  // CRC at last byte covers bytes 0..298
-  data[TOTAL_DATA - 1] = crc8(data.subarray(0, TOTAL_DATA - 1));
-
-  // Split into 3 blocks of 100 data bytes and RS encode each
-  const blocks = [];
-  for (let ch = 0; ch < NUM_CHANNELS; ch++) {
-    const offset = ch * DATA_PER_BLOCK;
-    const rsData = new Int32Array(BLOCK_SIZE);
-    for (let i = 0; i < DATA_PER_BLOCK; i++) {
-      rsData[i] = data[offset + i];
-    }
-    rsEncoder.encode(rsData, ECC_SIZE);
-
-    const encoded = new Uint8Array(BLOCK_SIZE);
-    for (let i = 0; i < BLOCK_SIZE; i++) {
-      encoded[i] = rsData[i];
-    }
-    blocks.push(encoded);
-  }
-
-  return blocks; // [rBlock, gBlock, bBlock]
+  return { rChannel, gChannel, bChannel };
 }
 
 /**
- * Decodes and validates a frame from 3 RS-encoded blocks.
- * @param {Uint8Array} rBlock - 128-byte R channel block
- * @param {Uint8Array} gBlock - 128-byte G channel block
- * @param {Uint8Array} bBlock - 128-byte B channel block
- * @returns {Object} - { valid, seq, isEof, payload, errorsCorrected, failedChannel }
+ * Decode from R, G, B channels.
  */
-function decodeFrame(rBlock, gBlock, bBlock) {
-  initRS();
+function decodeFrame(rChannel, gChannel, bChannel) {
+  const rsBlocks = [
+    rChannel.slice(0, RS_BLOCK_SIZE),
+    rChannel.slice(RS_BLOCK_SIZE, 2 * RS_BLOCK_SIZE),
+    gChannel.slice(0, RS_BLOCK_SIZE),
+    gChannel.slice(RS_BLOCK_SIZE, 2 * RS_BLOCK_SIZE),
+    bChannel.slice(0, RS_BLOCK_SIZE),
+    bChannel.slice(RS_BLOCK_SIZE, 2 * RS_BLOCK_SIZE)
+  ];
 
-  const blocks = [rBlock, gBlock, bBlock];
-  const decoded = new Uint8Array(TOTAL_DATA);
+  const frameData = new Uint8Array(FRAME_CAPACITY);
   let totalErrors = 0;
 
-  for (let ch = 0; ch < NUM_CHANNELS; ch++) {
-    const rsData = new Int32Array(BLOCK_SIZE);
-    for (let i = 0; i < BLOCK_SIZE; i++) {
-      rsData[i] = blocks[ch][i];
-    }
-
-    try {
-      totalErrors += rsDecoder.decode(rsData, ECC_SIZE);
-    } catch (e) {
-      return { valid: false, errorsCorrected: 0, failedChannel: ch };
-    }
-
-    const offset = ch * DATA_PER_BLOCK;
-    for (let i = 0; i < DATA_PER_BLOCK; i++) {
-      decoded[offset + i] = rsData[i];
-    }
+  for (let i = 0; i < 6; i++) {
+    const dec = rsDecode(rsBlocks[i], RS_ECC_SIZE);
+    if (!dec.valid) return { valid: false };
+    totalErrors += dec.errorsCorrected;
+    frameData.set(dec.data, i * RS_DATA_SIZE);
   }
 
-  // Verify CRC
-  const calculatedCrc = crc8(decoded.subarray(0, TOTAL_DATA - 1));
-  if (calculatedCrc !== decoded[TOTAL_DATA - 1]) {
-    return { valid: false, errorsCorrected: totalErrors };
-  }
-
-  // Extract header
-  const seqWithEof = decoded[0] | (decoded[1] << 8);
-  const seq = seqWithEof & 0x7FFF;
-  const isEof = (seqWithEof & 0x8000) !== 0;
-  const length = decoded[2] | (decoded[3] << 8);
-  const flags = decoded[4];
-
-  if (length > MAX_PAYLOAD_SIZE) {
-    return { valid: false, errorsCorrected: totalErrors };
-  }
-
-  const payload = new Uint8Array(decoded.subarray(HEADER_SIZE, HEADER_SIZE + length));
+  const flags = frameData[0];
+  const seed = (frameData[1] << 8) | frameData[2];
+  const numChunks = (frameData[3] << 8) | frameData[4];
+  const payload = frameData.slice(HEADER_SIZE);
 
   return {
     valid: true,
-    seq,
-    isEof,
+    errorsCorrected: totalErrors,
     flags,
-    payload,
-    errorsCorrected: totalErrors
+    seed,
+    numChunks,
+    payload
   };
 }
