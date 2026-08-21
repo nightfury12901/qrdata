@@ -32,6 +32,44 @@ const MAX_PAYLOAD_SIZE = TOTAL_DATA - HEADER_SIZE - FOOTER_SIZE; // 294 bytes
 const FLAG_TEXT = 0;
 const FLAG_FILE_META = 1;
 const FLAG_FILE_DATA = 2;
+const FLAG_FOUNTAIN_DATA = 3;
+
+// Mulberry32 PRNG
+function mulberry32(a) {
+  return function() {
+    var t = a += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+}
+
+/**
+ * Get the chunk indices to XOR for a given sequence number.
+ * @param {number} seq - The sequence number of the fountain frame.
+ * @param {number} totalChunks - The total number of source chunks.
+ * @returns {number[]} - Array of chunk indices.
+ */
+function getFountainIndices(seq, totalChunks) {
+  // Simple Robust Soliton or Uniform distribution.
+  // For GF(2) Gaussian Elimination on small N, uniform random subset (density ~0.5) is perfect.
+  const prng = mulberry32(seq + 1337); // Seed with seq
+  const indices = [];
+  // Ensure at least one chunk is selected to avoid empty frames
+  // But generally just picking each with 50% probability is optimal for GF(2).
+  // Actually, for fountain codes, degree 1, 2, 3 etc are better for Belief Propagation,
+  // but for Gaussian elimination, degree N/2 is fine. 
+  // Wait, if degree is N/2, decoding starts only at the very end.
+  // We'll just do uniform random inclusion (50% prob).
+  for (let i = 0; i < totalChunks; i++) {
+    if (prng() > 0.5) {
+      indices.push(i);
+    }
+  }
+  // Fallback if empty (very rare, 1 in 2^N)
+  if (indices.length === 0) indices.push(Math.floor(prng() * totalChunks));
+  return indices;
+}
 
 let rsEncoder = null;
 let rsDecoder = null;

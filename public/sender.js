@@ -26,8 +26,9 @@ const patternG = new Uint8Array(GRID_SIZE * GRID_SIZE);
 const patternB = new Uint8Array(GRID_SIZE * GRID_SIZE);
 
 let txInterval = null;
-let currentFrames = []; // Array of [rBlock, gBlock, bBlock] arrays
-let frameIndex = 0;
+let sourceChunks = [];
+let metadataFrameBlocks = null;
+let fountainSeq = 0;
 
 // ---- Canvas rendering ----
 const canvas = document.getElementById('gridCanvas');
@@ -89,81 +90,109 @@ function loadBlocksToPattern(blocks) {
     for (let bit = 0; bit < 8; bit++) {
       const cellIdx = i * 8 + bit;
       if (cellIdx >= GRID_SIZE * GRID_SIZE) break;
-      patternR[cellIdx] = (rBlock[i] >> (7 - bit)) & 1;
-      patternG[cellIdx] = (gBlock[i] >> (7 - bit)) & 1;
-      patternB[cellIdx] = (bBlock[i] >> (7 - bit)) & 1;
+      
+      const row = Math.floor(cellIdx / GRID_SIZE);
+      const col = cellIdx % GRID_SIZE;
+      const mask = (row + col) % 2; // spatial mask prevents false anchors
+      
+      patternR[cellIdx] = ((rBlock[i] >> (7 - bit)) & 1) ^ mask;
+      patternG[cellIdx] = ((gBlock[i] >> (7 - bit)) & 1) ^ mask;
+      patternB[cellIdx] = ((bBlock[i] >> (7 - bit)) & 1) ^ mask;
     }
   }
 }
 
 // ---- Transmission Logic ----
 
-async function startTransmission() {
+async function prepareSession() {
   const text = document.getElementById('msgInput').value;
   const fileInput = document.getElementById('fileInput');
   const file = fileInput.files[0];
 
   if (!text && !file) return;
 
-  currentFrames = [];
-  let seq = 0;
+  sourceChunks = [];
+  let payloadBytes;
+  
+  const metaObj = {
+    name: "text.txt",
+    size: 0,
+    type: "text/plain",
+    totalChunks: 0
+  };
 
   if (file) {
     if (file.size > 1024 * 1024) {
       alert("File is too large (max 1MB)");
       return;
     }
-    
-    // Create Metadata Frame (filename, size, mime)
-    const metaObj = {
-      name: file.name,
-      size: file.size,
-      type: file.type
-    };
-    const metaBytes = new TextEncoder().encode(JSON.stringify(metaObj));
-    currentFrames.push(encodeFrame(seq++, false, FLAG_FILE_META, metaBytes));
-
-    // Chunk File Data
+    metaObj.name = file.name;
+    metaObj.size = file.size;
+    metaObj.type = file.type;
     const arrayBuffer = await file.arrayBuffer();
-    const payloadBytes = new Uint8Array(arrayBuffer);
-    
-    let offset = 0;
-    while (offset < payloadBytes.length) {
-      const chunk = payloadBytes.slice(offset, offset + MAX_PAYLOAD_SIZE);
-      const isEof = (offset + MAX_PAYLOAD_SIZE) >= payloadBytes.length;
-      currentFrames.push(encodeFrame(seq++, isEof, FLAG_FILE_DATA, chunk));
-      offset += chunk.length;
-    }
+    payloadBytes = new Uint8Array(arrayBuffer);
   } else {
-    // Regular text transmission
-    const payloadBytes = new TextEncoder().encode(text);
-    let offset = 0;
-    while (offset < payloadBytes.length || offset === 0) {
-      const chunk = payloadBytes.slice(offset, offset + MAX_PAYLOAD_SIZE);
-      const isEof = (offset + MAX_PAYLOAD_SIZE) >= payloadBytes.length;
-      currentFrames.push(encodeFrame(seq++, isEof, FLAG_TEXT, chunk));
-      offset += chunk.length;
-    }
+    payloadBytes = new TextEncoder().encode(text);
+    metaObj.size = payloadBytes.length;
   }
 
-  frameIndex = 0;
-  document.getElementById('btnStart').disabled = true;
-  document.getElementById('btnStop').disabled = false;
+  // Chunk the data
+  let offset = 0;
+  while (offset < payloadBytes.length || offset === 0) {
+    // Pad chunks to MAX_PAYLOAD_SIZE so XOR works properly
+    const chunk = new Uint8Array(MAX_PAYLOAD_SIZE);
+    const slice = payloadBytes.slice(offset, offset + MAX_PAYLOAD_SIZE);
+    chunk.set(slice);
+    sourceChunks.push(chunk);
+    offset += slice.length;
+  }
+  
+  metaObj.totalChunks = sourceChunks.length;
+
+  // Create Metadata Frame (Handshake)
+  const metaBytes = new TextEncoder().encode(JSON.stringify(metaObj));
+  metadataFrameBlocks = encodeFrame(0, true, FLAG_FILE_META, metaBytes);
+  
+  // Display the handshake frame statically
+  loadBlocksToPattern(metadataFrameBlocks);
+  render();
+
+  document.getElementById('btnPrepare').disabled = true;
+  document.getElementById('btnStart').disabled = false;
   document.getElementById('msgInput').disabled = true;
   document.getElementById('fileInput').disabled = true;
+  document.getElementById('txStatus').textContent = 'Handshake Ready';
+  document.getElementById('txChunks').textContent = `${sourceChunks.length} chunks`;
+}
+
+function startBroadcast() {
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').disabled = false;
   document.getElementById('speedSlider').disabled = true;
-  document.getElementById('txStatus').textContent = 'Transmitting...';
+  document.getElementById('txStatus').textContent = 'Broadcasting...';
 
   const speedMs = parseInt(document.getElementById('speedSlider').value);
+  fountainSeq = 1; // start fountain seq at 1
 
-  // Transmit loop
   txInterval = setInterval(() => {
-    loadBlocksToPattern(currentFrames[frameIndex]);
+    // 1. Get random indices for this sequence number
+    const indices = getFountainIndices(fountainSeq, sourceChunks.length);
+    
+    // 2. XOR the selected chunks together
+    const xorPayload = new Uint8Array(MAX_PAYLOAD_SIZE);
+    for (const idx of indices) {
+      for (let i = 0; i < MAX_PAYLOAD_SIZE; i++) {
+        xorPayload[i] ^= sourceChunks[idx][i];
+      }
+    }
+    
+    // 3. Encode the frame and load to pattern
+    const blocks = encodeFrame(fountainSeq, false, FLAG_FOUNTAIN_DATA, xorPayload);
+    loadBlocksToPattern(blocks);
     render();
 
-    document.getElementById('txFrame').textContent = `Frame ${frameIndex + 1} of ${currentFrames.length}`;
-
-    frameIndex = (frameIndex + 1) % currentFrames.length;
+    document.getElementById('txFrame').textContent = `Fountain Frame: ${fountainSeq}`;
+    fountainSeq++;
   }, speedMs);
 }
 
@@ -172,17 +201,20 @@ function stopTransmission() {
     clearInterval(txInterval);
     txInterval = null;
   }
-  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnPrepare').disabled = false;
+  document.getElementById('btnStart').disabled = true;
   document.getElementById('btnStop').disabled = true;
   document.getElementById('msgInput').disabled = false;
   document.getElementById('fileInput').disabled = false;
   document.getElementById('speedSlider').disabled = false;
   document.getElementById('txStatus').textContent = 'Idle';
   document.getElementById('txFrame').textContent = '—';
+  document.getElementById('txChunks').textContent = '';
 }
 
 // ---- Init ----
-document.getElementById('btnStart').addEventListener('click', startTransmission);
+document.getElementById('btnPrepare').addEventListener('click', prepareSession);
+document.getElementById('btnStart').addEventListener('click', startBroadcast);
 document.getElementById('btnStop').addEventListener('click', stopTransmission);
 window.addEventListener('resize', render);
 

@@ -66,12 +66,20 @@ if (btnCopy) {
 
 if (btnReset) {
   btnReset.addEventListener('click', () => {
-    receivedFrames.clear();
-    expectedTotalFrames = null;
+    matrix = [];
+    rank = 0;
+    totalChunks = null;
+    fileMeta = null;
     firstValidFrameTime = null;
     reassemblyComplete = false;
     currentFileToDownload = null;
     statMessage.value = 'Waiting for frames...';
+    
+    const statProgressText = document.getElementById('statProgressText');
+    const statProgressBar = document.getElementById('statProgressBar');
+    if (statProgressText) statProgressText.textContent = '0%';
+    if (statProgressBar) statProgressBar.style.width = '0%';
+
     if (btnDownload) {
       btnDownload.style.display = 'none';
       btnDownload.href = '';
@@ -163,8 +171,10 @@ const stats = {
 };
 
 // Reassembly state
-let receivedFrames = new Map();
-let expectedTotalFrames = null;
+let totalChunks = null;
+let matrix = [];
+let rank = 0;
+let fileMeta = null;
 let firstValidFrameTime = null;
 let reassemblyComplete = false;
 let currentFileToDownload = null;
@@ -342,12 +352,13 @@ function decodeLoop() {
       const bitsB = new Uint8Array(numCells);
       
       for (let i = 0; i < numCells; i++) {
-        // We use inverted threshold because sender uses 1 for color ON, and screen color is brighter than black
-        // Wait, screen color ON is BRIGHT (255), OFF is BLACK (0).
-        // So > thresh means 1.
-        bitsR[i] = cellR[i] > threshR ? 1 : 0;
-        bitsG[i] = cellG[i] > threshG ? 1 : 0;
-        bitsB[i] = cellB[i] > threshB ? 1 : 0;
+        const row = Math.floor(i / GRID_SIZE);
+        const col = i % GRID_SIZE;
+        const mask = (row + col) % 2; // unmask spatial checkerboard
+        
+        bitsR[i] = (cellR[i] > threshR ? 1 : 0) ^ mask;
+        bitsG[i] = (cellG[i] > threshG ? 1 : 0) ^ mask;
+        bitsB[i] = (cellB[i] > threshB ? 1 : 0) ^ mask;
       }
 
       // 10. Convert bits to 128 bytes per channel
@@ -377,57 +388,72 @@ function decodeLoop() {
         stats.validFrames++;
         stats.totalErrorsCorrected += frame.errorsCorrected;
         
-        if (!receivedFrames.has(frame.seq)) {
-          receivedFrames.set(frame.seq, frame);
-        }
-        if (frame.isEof) {
-          expectedTotalFrames = frame.seq + 1;
-        }
-
-        // Check if we have all frames
-        if (expectedTotalFrames !== null && receivedFrames.size === expectedTotalFrames && !reassemblyComplete) {
-          reassemblyComplete = true;
-          // Concatenate all payloads
-          const sortedSeq = Array.from(receivedFrames.keys()).sort((a, b) => a - b);
-          let totalLen = 0;
-          for (let s of sortedSeq) totalLen += receivedFrames.get(s).payload.length;
-          
-          const fullPayload = new Uint8Array(totalLen);
-          let offset = 0;
-          for (let s of sortedSeq) {
-            const p = receivedFrames.get(s).payload;
-            fullPayload.set(p, offset);
-            offset += p.length;
+        if (frame.flags === 1 /* FLAG_FILE_META */ && !fileMeta) {
+          try {
+            const metaJson = new TextDecoder().decode(frame.payload);
+            const meta = JSON.parse(metaJson);
+            fileMeta = meta;
+            totalChunks = meta.totalChunks;
+            matrix = new Array(totalChunks).fill(null);
+            rank = 0;
+            statMessage.value = `Session Found: ${meta.name} (${(meta.size / 1024).toFixed(1)} KB). Waiting for broadcast...`;
+          } catch (e) {
+            console.error("Failed to parse file metadata:", e);
           }
+        } 
+        else if (frame.flags === 3 /* FLAG_FOUNTAIN_DATA */ && totalChunks && !reassemblyComplete) {
+          // GF(2) Gaussian Elimination step
+          const indices = getFountainIndices(frame.seq, totalChunks);
+          const coeff = new Uint8Array(totalChunks);
+          for (let idx of indices) coeff[idx] = 1;
+          const rowPayload = new Uint8Array(frame.payload);
           
-          // Check flags from the first frame to see if it's a file transfer
-          const firstFrame = receivedFrames.get(0);
-          if (firstFrame && firstFrame.flags === 1 /* FLAG_FILE_META */) {
-            try {
-              // Parse metadata
-              const metaLen = firstFrame.payload.length;
-              const metaJson = new TextDecoder().decode(firstFrame.payload);
-              const meta = JSON.parse(metaJson);
-              
-              // The rest of the payload is file data (flags === 2)
-              const fileData = fullPayload.slice(metaLen);
-              currentFileToDownload = new File([fileData], meta.name, { type: meta.type || 'application/octet-stream' });
-              
-              statMessage.value = `[File Transfer Complete]\nName: ${meta.name}\nSize: ${(meta.size / 1024).toFixed(1)} KB\nType: ${meta.type || 'unknown'}`;
-              
-              const btnDownload = document.getElementById('btnDownload');
-              if (btnDownload) {
-                btnDownload.style.display = 'block';
-                btnDownload.href = 'javascript:void(0)';
-                btnDownload.removeAttribute('download');
+          let added = false;
+          for (let i = 0; i < totalChunks; i++) {
+            if (coeff[i] === 1) {
+              if (matrix[i]) {
+                // Eliminate
+                for (let j = i; j < totalChunks; j++) coeff[j] ^= matrix[i].coeff[j];
+                for (let j = 0; j < rowPayload.length; j++) rowPayload[j] ^= matrix[i].payload[j];
+              } else {
+                // Found new pivot
+                matrix[i] = { coeff, payload: rowPayload };
+                rank++;
+                added = true;
+                
+                // Back-substitute upwards to maintain Reduced Row Echelon Form
+                for (let k = 0; k < i; k++) {
+                  if (matrix[k] && matrix[k].coeff[i] === 1) {
+                    for (let j = i; j < totalChunks; j++) matrix[k].coeff[j] ^= coeff[j];
+                    for (let j = 0; j < rowPayload.length; j++) matrix[k].payload[j] ^= rowPayload[j];
+                  }
+                }
+                break;
               }
-            } catch (e) {
-              statMessage.value = "Failed to parse file metadata: " + e.message;
             }
-          } else {
-            // Regular text message
-            const msg = new TextDecoder().decode(fullPayload);
-            statMessage.value = msg;
+          }
+
+          if (added && rank === totalChunks) {
+            reassemblyComplete = true;
+            
+            // Reassemble the file
+            const fullPayload = new Uint8Array(totalChunks * MAX_PAYLOAD_SIZE);
+            for (let i = 0; i < totalChunks; i++) {
+              fullPayload.set(matrix[i].payload, i * MAX_PAYLOAD_SIZE);
+            }
+            
+            // Truncate to exact file size
+            const exactData = fullPayload.slice(0, fileMeta.size);
+            
+            currentFileToDownload = new File([exactData], fileMeta.name, { type: fileMeta.type || 'application/octet-stream' });
+            statMessage.value = `[File Transfer Complete]\nName: ${fileMeta.name}\nSize: ${(fileMeta.size / 1024).toFixed(1)} KB`;
+            
+            const btnDownload = document.getElementById('btnDownload');
+            if (btnDownload) {
+              btnDownload.style.display = 'block';
+              btnDownload.href = 'javascript:void(0)';
+              btnDownload.removeAttribute('download');
+            }
           }
         }
         decoded = true;
@@ -469,13 +495,19 @@ function decodeLoop() {
   statErrors.textContent = stats.totalErrorsCorrected > 0 ? stats.totalErrorsCorrected : '0';
 
   // Progress
-  statProgress.textContent = expectedTotalFrames !== null
-    ? `${receivedFrames.size} / ${expectedTotalFrames} frames`
-    : `${receivedFrames.size} / ? frames`;
+  const progressPercent = totalChunks ? (rank / totalChunks) * 100 : 0;
+  const statProgressText = document.getElementById('statProgressText');
+  const statProgressBar = document.getElementById('statProgressBar');
+  if (statProgressText && statProgressBar) {
+    statProgressText.textContent = totalChunks 
+      ? `${rank} / ${totalChunks} (${progressPercent.toFixed(1)}%)`
+      : `0%`;
+    statProgressBar.style.width = `${progressPercent}%`;
+  }
   
-  if (reassemblyComplete) {
-    statProgress.textContent += ' (Complete ✓)';
-    statProgress.className = 'value';
+  if (reassemblyComplete && statProgressText) {
+    statProgressText.textContent = '100% (Complete ✓)';
+    statProgressText.className = 'value';
   }
 
   statAnchors.textContent = anchors

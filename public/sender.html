@@ -22,12 +22,14 @@
     </div>
 
     <div style="display:flex; flex-direction:column; gap:4px;">
-      <button class="btn" id="btnStart">Start TX</button>
+      <button class="btn" id="btnPrepare">Prepare Session</button>
+      <button class="btn" id="btnStart" disabled>Start Broadcast</button>
       <button class="btn" id="btnStop" disabled>Stop</button>
     </div>
     <div style="display:flex; flex-direction:column; gap:4px; font-size:12px; color:#aaa; min-width:120px;">
       <span id="txStatus">Idle</span>
       <span id="txFrame">—</span>
+      <span id="txChunks" style="color:#0f0;"></span>
     </div>
   </div>
   <canvas id="gridCanvas"></canvas>
