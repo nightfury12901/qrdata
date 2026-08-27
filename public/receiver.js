@@ -179,6 +179,50 @@ let firstValidFrameTime = null;
 let reassemblyComplete = false;
 let currentFileToDownload = null;
 
+// ---- Audio NACK / ACK ----
+let audioCtx = null;
+let lastNackTime = 0;
+
+function playAudioCommand(type, chunkIndex = 0) {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  
+  const now = audioCtx.currentTime;
+  let freqs = [];
+  let duration = 0.2;
+  
+  if (type === 'ACK') {
+    freqs = [19500];
+    duration = 0.5;
+  } else if (type === 'NACK') {
+    freqs = [
+      15000 + (chunkIndex % 10) * 100,
+      16000 + Math.floor((chunkIndex / 10) % 10) * 100,
+      17000 + Math.floor((chunkIndex / 100) % 10) * 100,
+      18000 + Math.floor((chunkIndex / 1000) % 10) * 100
+    ];
+  }
+  
+  const gainNode = audioCtx.createGain();
+  gainNode.connect(audioCtx.destination);
+  
+  // Envelope to prevent clicking
+  gainNode.gain.setValueAtTime(0, now);
+  gainNode.gain.linearRampToValueAtTime(1.0 / freqs.length, now + 0.05);
+  gainNode.gain.setValueAtTime(1.0 / freqs.length, now + duration - 0.05);
+  gainNode.gain.linearRampToValueAtTime(0, now + duration);
+  
+  for (const f of freqs) {
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+    osc.connect(gainNode);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+}
+
 // ---- Processing canvas (offscreen) ----
 let procCanvas = null;
 let procCtx = null;
@@ -453,6 +497,7 @@ function decodeLoop() {
 
           if (added && rank === totalChunks) {
             reassemblyComplete = true;
+            playAudioCommand('ACK');
             
             // Reassemble the file
             const fullPayload = new Uint8Array(totalChunks * MAX_PAYLOAD_SIZE);
@@ -548,6 +593,23 @@ function decodeLoop() {
 
   // ---- Debug overlay ----
   drawOverlay(anchors, stats.lastCells);
+
+  // ---- Audio NACK checks ----
+  const now = performance.now();
+  if (totalChunks && !reassemblyComplete && fileMeta && (now - lastNackTime > 500)) {
+    // Find the first missing chunk
+    let missingIdx = -1;
+    for (let i = 0; i < totalChunks; i++) {
+      if (!matrix[i]) {
+        missingIdx = i;
+        break;
+      }
+    }
+    if (missingIdx !== -1) {
+      playAudioCommand('NACK', missingIdx);
+      lastNackTime = now;
+    }
+  }
 
   // ---- Schedule next frame ----
   requestAnimationFrame(decodeLoop);

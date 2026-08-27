@@ -30,6 +30,12 @@ let sourceChunks = [];
 let metadataFrameBlocks = null;
 let fountainSeq = 0;
 
+// Audio NACK/ACK state
+let audioCtx = null;
+let analyser = null;
+let forceNextSeq = null;
+let audioListenLoopId = null;
+
 // ---- Canvas rendering ----
 const canvas = document.getElementById('gridCanvas');
 const ctx = canvas.getContext('2d');
@@ -98,6 +104,81 @@ function loadBlocksToPattern(blocks) {
       patternR[cellIdx] = ((rBlock[i] >> (7 - bit)) & 1) ^ mask;
       patternG[cellIdx] = ((gBlock[i] >> (7 - bit)) & 1) ^ mask;
       patternB[cellIdx] = ((bBlock[i] >> (7 - bit)) & 1) ^ mask;
+    }
+}
+  }
+}
+
+// ---- Audio NACK / ACK Listener ----
+async function initAudioListener() {
+  if (audioCtx) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 4096;
+    const source = audioCtx.createMediaStreamSource(stream);
+    source.connect(analyser);
+    
+    analyzeAudio();
+  } catch (e) {
+    console.error("Audio NACK listener failed:", e);
+  }
+}
+
+function analyzeAudio() {
+  audioListenLoopId = requestAnimationFrame(analyzeAudio);
+  if (!txInterval || !sourceChunks.length) return; // Only process when transmitting
+  
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Float32Array(bufferLength);
+  analyser.getFloatFrequencyData(dataArray);
+  
+  const binSize = audioCtx.sampleRate / analyser.fftSize;
+  
+  const getPeak = (minFreq, maxFreq) => {
+    let maxVal = -Infinity;
+    let peakFreq = 0;
+    const minBin = Math.floor(minFreq / binSize);
+    const maxBin = Math.ceil(maxFreq / binSize);
+    for (let i = minBin; i <= maxBin; i++) {
+      if (dataArray[i] > maxVal) {
+        maxVal = dataArray[i];
+        peakFreq = i * binSize;
+      }
+    }
+    return { val: maxVal, freq: peakFreq };
+  };
+  
+  const threshold = -60; // dB
+  
+  // Check for ACK
+  const ackPeak = getPeak(19300, 19700);
+  if (ackPeak.val > threshold) {
+    console.log("[Audio ACK] Transfer complete signal received!");
+    stopTransmission();
+    document.getElementById('txStatus').textContent = 'Transfer Complete (ACK)';
+    return;
+  }
+  
+  // Check for NACK
+  const p1 = getPeak(14900, 16000);
+  const p2 = getPeak(15900, 17000);
+  const p3 = getPeak(16900, 18000);
+  const p4 = getPeak(17900, 19000);
+  
+  if (p1.val > threshold && p2.val > threshold && p3.val > threshold && p4.val > threshold) {
+    const d1 = Math.round((p1.freq - 15000) / 100);
+    const d2 = Math.round((p2.freq - 16000) / 100);
+    const d3 = Math.round((p3.freq - 17000) / 100);
+    const d4 = Math.round((p4.freq - 18000) / 100);
+    
+    if (d1 >= 0 && d1 <= 9 && d2 >= 0 && d2 <= 9 && d3 >= 0 && d3 <= 9 && d4 >= 0 && d4 <= 9) {
+      const missingIdx = d4 * 1000 + d3 * 100 + d2 * 10 + d1;
+      if (missingIdx < sourceChunks.length) {
+        console.log(`[Audio NACK] Receiver requested chunk ${missingIdx}`);
+        forceNextSeq = missingIdx;
+      }
     }
   }
 }
@@ -171,12 +252,22 @@ function startBroadcast() {
   document.getElementById('speedSlider').disabled = true;
   document.getElementById('txStatus').textContent = 'Broadcasting...';
 
+  initAudioListener();
+
   const speedMs = parseInt(document.getElementById('speedSlider').value);
-  fountainSeq = 1; // start fountain seq at 1
+  fountainSeq = 0; // start fountain seq at 0 for systematic transmission
 
   txInterval = setInterval(() => {
-    // 1. Get random indices for this sequence number
-    const indices = getFountainIndices(fountainSeq, sourceChunks.length);
+    let currentSeq = fountainSeq;
+    if (forceNextSeq !== null) {
+      currentSeq = forceNextSeq;
+      forceNextSeq = null; // reset
+    } else {
+      fountainSeq++;
+    }
+
+    // 1. Get indices for this sequence number
+    const indices = getFountainIndices(currentSeq, sourceChunks.length);
     
     // 2. XOR the selected chunks together
     const xorPayload = new Uint8Array(MAX_PAYLOAD_SIZE);
@@ -187,12 +278,11 @@ function startBroadcast() {
     }
     
     // 3. Encode the frame and load to pattern
-    const blocks = encodeFrame(fountainSeq, false, FLAG_FOUNTAIN_DATA, xorPayload);
+    const blocks = encodeFrame(currentSeq, false, FLAG_FOUNTAIN_DATA, xorPayload);
     loadBlocksToPattern(blocks);
     render();
 
-    document.getElementById('txFrame').textContent = `Fountain Frame: ${fountainSeq}`;
-    fountainSeq++;
+    document.getElementById('txFrame').textContent = `Frame: ${currentSeq}`;
   }, speedMs);
 }
 

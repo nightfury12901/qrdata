@@ -51,16 +51,18 @@ function mulberry32(a) {
  * @returns {number[]} - Array of chunk indices.
  */
 function getFountainIndices(seq, totalChunks) {
-  // Simple Robust Soliton or Uniform distribution.
+  // Phase 3: Systematic phase!
+  // Send the raw original chunks first (seq 0 to totalChunks-1).
+  if (seq < totalChunks) {
+    return [seq];
+  }
+
+  // Fountain phase! (seq >= totalChunks)
   // For GF(2) Gaussian Elimination on small N, uniform random subset (density ~0.5) is perfect.
   const prng = mulberry32(seq + 1337); // Seed with seq
   const indices = [];
-  // Ensure at least one chunk is selected to avoid empty frames
-  // But generally just picking each with 50% probability is optimal for GF(2).
-  // Actually, for fountain codes, degree 1, 2, 3 etc are better for Belief Propagation,
-  // but for Gaussian elimination, degree N/2 is fine. 
-  // Wait, if degree is N/2, decoding starts only at the very end.
-  // We'll just do uniform random inclusion (50% prob).
+
+  // picking each with 50% probability is optimal for GF(2) Gaussian elimination.
   for (let i = 0; i < totalChunks; i++) {
     if (prng() > 0.5) {
       indices.push(i);
