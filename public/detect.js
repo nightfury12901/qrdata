@@ -197,7 +197,7 @@ function filterAnchors(blobs, frameW, frameH) {
   // The pattern may fill 20-90% of the frame. So anchor size in pixels
   // is roughly 2.5% to 11% of the frame dimension.
   const frameDim = Math.min(frameW, frameH);
-  const minSide = frameDim * 0.005;  // very generous lower bound (anchors are ~4.7% of pattern)
+  const minSide = frameDim * 0.015;  // very generous lower bound (anchors are ~4.7% of pattern)
   const maxSide = frameDim * 0.25;   // generous upper bound
 
   return blobs.filter(b => {
@@ -237,7 +237,7 @@ function identifyAnchors(candidates, frameW, frameH) {
   const topCandidates = candidates.slice(0, 10);
 
   let bestQuad = null;
-  let bestError = Infinity;
+  let bestScore = -Infinity;
 
   // Evaluate all combinations of 4 blobs (10 choose 4 = 210 combinations)
   for (let i = 0; i < topCandidates.length - 3; i++) {
@@ -272,11 +272,16 @@ function identifyAnchors(candidates, frameW, frameH) {
           const diagRatio = Math.max(diag1 / diag2, diag2 / diag1);
           if (diagRatio > 2.5) continue;
           
-          // Minimize the deviation from a perfect square
+          // We want the LARGEST quad that is also as SQUARE as possible.
+          // Calculate how distorted the quad is (0.0 = perfect square)
           const errorScore = (oppRatio1 - 1.0) + (oppRatio2 - 1.0) + (diagRatio - 1.0);
           
-          if (errorScore < bestError) {
-            bestError = errorScore;
+          const area = quadArea(pts);
+          // Score heavily penalizes distortion, but allows large true anchors to beat tiny perfect squares of noise
+          const score = area / (1.0 + errorScore * 10.0);
+          
+          if (score > bestScore) {
+            bestScore = score;
             bestQuad = pts;
           }
         }
