@@ -19,14 +19,15 @@ function crc8(data) {
 }
 
 // ---- Layout constants ----
-const BLOCK_SIZE = 128;        // bytes per RS block (1024 cells / 8 bits)
-const ECC_SIZE = 28;           // RS parity bytes per block
-const DATA_PER_BLOCK = BLOCK_SIZE - ECC_SIZE; // 100 data bytes per block
+const BLOCKS_PER_CHANNEL = 4;
+const BLOCK_SIZE = 200;        // bytes per RS block
+const ECC_SIZE = 32;           // RS parity bytes per block
+const DATA_PER_BLOCK = BLOCK_SIZE - ECC_SIZE; // 168 data bytes per block
 const NUM_CHANNELS = 3;        // R, G, B
-const TOTAL_DATA = DATA_PER_BLOCK * NUM_CHANNELS; // 300 bytes total data
+const TOTAL_DATA = DATA_PER_BLOCK * BLOCKS_PER_CHANNEL * NUM_CHANNELS; // 2016 bytes total data
 const HEADER_SIZE = 5;         // seq(2) + length(2) + flags(1)
 const FOOTER_SIZE = 1;         // CRC-8
-const MAX_PAYLOAD_SIZE = TOTAL_DATA - HEADER_SIZE - FOOTER_SIZE; // 294 bytes
+const MAX_PAYLOAD_SIZE = TOTAL_DATA - HEADER_SIZE - FOOTER_SIZE; // 2010 bytes
 
 // Protocol Flags
 const FLAG_TEXT = 0;
@@ -127,24 +128,28 @@ function encodeFrame(seq, isEof, flags, payload) {
   // CRC at last byte covers bytes 0..298
   data[TOTAL_DATA - 1] = crc8(data.subarray(0, TOTAL_DATA - 1));
 
-  // Split into 3 blocks of 100 data bytes and RS encode each
+  // Split into 4 blocks per channel (12 blocks total) and RS encode each
   const blocks = [];
   for (let ch = 0; ch < NUM_CHANNELS; ch++) {
-    const offset = ch * DATA_PER_BLOCK;
-    const rsData = new Int32Array(BLOCK_SIZE);
-    for (let i = 0; i < DATA_PER_BLOCK; i++) {
-      rsData[i] = data[offset + i];
-    }
-    rsEncoder.encode(rsData, ECC_SIZE);
+    const channelData = new Uint8Array(BLOCK_SIZE * BLOCKS_PER_CHANNEL);
+    
+    for (let b = 0; b < BLOCKS_PER_CHANNEL; b++) {
+      const dataOffset = (ch * BLOCKS_PER_CHANNEL + b) * DATA_PER_BLOCK;
+      const rsData = new Int32Array(BLOCK_SIZE);
+      for (let i = 0; i < DATA_PER_BLOCK; i++) {
+        rsData[i] = data[dataOffset + i];
+      }
+      rsEncoder.encode(rsData, ECC_SIZE);
 
-    const encoded = new Uint8Array(BLOCK_SIZE);
-    for (let i = 0; i < BLOCK_SIZE; i++) {
-      encoded[i] = rsData[i];
+      const blockOffset = b * BLOCK_SIZE;
+      for (let i = 0; i < BLOCK_SIZE; i++) {
+        channelData[blockOffset + i] = rsData[i];
+      }
     }
-    blocks.push(encoded);
+    blocks.push(channelData);
   }
 
-  return blocks; // [rBlock, gBlock, bBlock]
+  return blocks; // [rChannelData, gChannelData, bChannelData] (each is 800 bytes)
 }
 
 /**
@@ -162,20 +167,23 @@ function decodeFrame(rBlock, gBlock, bBlock) {
   let totalErrors = 0;
 
   for (let ch = 0; ch < NUM_CHANNELS; ch++) {
-    const rsData = new Int32Array(BLOCK_SIZE);
-    for (let i = 0; i < BLOCK_SIZE; i++) {
-      rsData[i] = blocks[ch][i];
-    }
+    for (let b = 0; b < BLOCKS_PER_CHANNEL; b++) {
+      const blockOffset = b * BLOCK_SIZE;
+      const rsData = new Int32Array(BLOCK_SIZE);
+      for (let i = 0; i < BLOCK_SIZE; i++) {
+        rsData[i] = blocks[ch][blockOffset + i];
+      }
 
-    try {
-      totalErrors += rsDecoder.decode(rsData, ECC_SIZE);
-    } catch (e) {
-      return { valid: false, errorsCorrected: 0, failedChannel: ch };
-    }
+      try {
+        totalErrors += rsDecoder.decode(rsData, ECC_SIZE);
+      } catch (e) {
+        return { valid: false, errorsCorrected: 0, failedChannel: ch };
+      }
 
-    const offset = ch * DATA_PER_BLOCK;
-    for (let i = 0; i < DATA_PER_BLOCK; i++) {
-      decoded[offset + i] = rsData[i];
+      const dataOffset = (ch * BLOCKS_PER_CHANNEL + b) * DATA_PER_BLOCK;
+      for (let i = 0; i < DATA_PER_BLOCK; i++) {
+        decoded[dataOffset + i] = rsData[i];
+      }
     }
   }
 

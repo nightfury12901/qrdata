@@ -10,17 +10,17 @@
  */
 
 // ---- Layout constants (must match sender.js) ----
-const GRID_SIZE = 32;
-const TOTAL_UNITS = 46;
-const GRID_ORIGIN_X = 7;
-const GRID_ORIGIN_Y = 7;
+const GRID_SIZE = 80;
+const TOTAL_UNITS = 98;
+const GRID_ORIGIN_X = 9;
+const GRID_ORIGIN_Y = 9;
 
 // Ideal anchor centers in unit coordinates
 const IDEAL_ANCHORS = {
-  TL: [4, 4],
-  TR: [42, 4],
-  BL: [4, 42],
-  BR: [42, 42],
+  TL: [5, 5],
+  TR: [93, 5],
+  BL: [5, 93],
+  BR: [93, 93],
 };
 
 // Ideal cell centers
@@ -417,12 +417,12 @@ function decodeLoop() {
         bitsB[i] = (cellB[i] > threshB ? 1 : 0) ^ mask;
       }
 
-      // 10. Convert bits to 128 bytes per channel
-      const rBlock = new Uint8Array(128);
-      const gBlock = new Uint8Array(128);
-      const bBlock = new Uint8Array(128);
+      // 10. Convert bits to 800 bytes per channel
+      const rBlock = new Uint8Array(800);
+      const gBlock = new Uint8Array(800);
+      const bBlock = new Uint8Array(800);
       
-      for (let i = 0; i < 128; i++) {
+      for (let i = 0; i < 800; i++) {
         let byteR = 0, byteG = 0, byteB = 0;
         for (let bit = 0; bit < 8; bit++) {
           const idx = i * 8 + bit;

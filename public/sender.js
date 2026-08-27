@@ -7,17 +7,17 @@
  */
 
 // ---- Layout constants (unit coordinates) ----
-const GRID_SIZE = 32;
-const TOTAL_UNITS = 46;
-const GRID_ORIGIN = { x: 7, y: 7 };
+const GRID_SIZE = 80;
+const TOTAL_UNITS = 98;
+const GRID_ORIGIN = { x: 9, y: 9 };
 
 const ANCHORS = [
   { x: 3, y: 3,  hollow: false }, // TL
-  { x: 41, y: 3, hollow: false }, // TR
-  { x: 3, y: 41, hollow: false }, // BL
-  { x: 41, y: 41, hollow: true }, // BR — orientation marker
+  { x: 91, y: 3, hollow: false }, // TR
+  { x: 3, y: 91, hollow: false }, // BL
+  { x: 91, y: 91, hollow: true }, // BR — orientation marker
 ];
-const ANCHOR_SIZE = 2; // units
+const ANCHOR_SIZE = 4; // units
 
 // ---- State ----
 // 3 pattern arrays: one per color channel (0 = off, 1 = on)
@@ -91,8 +91,8 @@ function render() {
 
 // Load 3 RS-encoded blocks into the RGB pattern arrays
 function loadBlocksToPattern(blocks) {
-  const [rBlock, gBlock, bBlock] = blocks;
-  for (let i = 0; i < 128; i++) {
+  const [rBlock, gBlock, bBlock] = blocks; // each block is 800 bytes
+  for (let i = 0; i < 800; i++) {
     for (let bit = 0; bit < 8; bit++) {
       const cellIdx = i * 8 + bit;
       if (cellIdx >= GRID_SIZE * GRID_SIZE) break;

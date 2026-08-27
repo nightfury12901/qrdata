@@ -344,10 +344,10 @@ function identifyAnchors(candidates, frameW, frameH) {
     tr = p2; bl = p1;
   }
 
-  // Compute pixels-per-unit for cell sampling (distance is 38 units)
+  // Compute pixels-per-unit for cell sampling (distance is 88 units)
   const distTR = Math.hypot(tr.cx - tl.cx, tr.cy - tl.cy);
   const distBL = Math.hypot(bl.cx - tl.cx, bl.cy - tl.cy);
-  const pixelsPerUnit = (distTR + distBL) / 76;
+  const pixelsPerUnit = (distTR + distBL) / 176;
 
   return {
     TL: [tl.cx, tl.cy],
