@@ -105,7 +105,6 @@ function loadBlocksToPattern(blocks) {
       patternG[cellIdx] = ((gBlock[i] >> (7 - bit)) & 1) ^ mask;
       patternB[cellIdx] = ((bBlock[i] >> (7 - bit)) & 1) ^ mask;
     }
-}
   }
 }
 
