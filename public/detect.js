@@ -227,93 +227,55 @@ function filterAnchors(blobs, frameW, frameH) {
 function identifyAnchors(candidates, frameW, frameH) {
   if (candidates.length < 4) return null;
 
-  // Minimum quad diagonal: the true grid should fill a meaningful portion of the frame.
-  // At normal viewing distance, the grid fills 30-80% of the frame.
-  // The anchor diagonal spans ~54 units out of 46 total (corner to corner).
-  // Requiring 15% of frame diagonal eliminates tiny false-positive quads
-  // formed by clusters of data cells.
   const frameDiag = Math.hypot(frameW, frameH);
   const minQuadDiag = frameDiag * 0.15;
 
-  // 1. Separate candidates into solid and hollow
-  const hollow = [];
-  const solid = [];
-  for (const c of candidates) {
-    if (c.solidity >= 0.35 && c.solidity <= 0.92) {
-      hollow.push(c);
-    } else if (c.solidity > 0.92) {
-      solid.push(c);
-    }
-  }
-
-  if (hollow.length === 0 || solid.length < 3) return null;
+  // Sort candidates by area descending and take top 10 to ignore tiny noise
+  candidates.sort((a, b) => b.area - a.area);
+  const topCandidates = candidates.slice(0, 10);
 
   let bestQuad = null;
-  let bestArea = 0;
+  let bestError = Infinity;
 
-  // 2. Search for a square-ish configuration around each hollow anchor
-  for (const br of hollow) {
-    // Performance optimization: 
-    // True anchors are 2x2 units, making them the largest solid blobs in the image 
-    // (except for massive background clutter like the laptop bezel, which we filter out).
-    // Sort by area descending and take the top 40. This reduces N from ~500 (all data cells)
-    // to 40, turning 67 million loops into just ~9,880 loops, guaranteeing 60fps!
-    
-    // First reject massive background clutter (laptop bezel)
-    let validSolid = solid.filter(c => c.bbox.w < br.bbox.w * 3.0 && c.bbox.h < br.bbox.h * 3.0);
-    // Then take the top 40 largest remaining blobs
-    validSolid.sort((a, b) => b.area - a.area);
-    validSolid = validSolid.slice(0, 40);
-
-    for (let i = 0; i < validSolid.length - 1; i++) {
-      for (let j = i + 1; j < validSolid.length; j++) {
-        const p1 = validSolid[i];
-        const p2 = validSolid[j];
-
-        const d1 = Math.hypot(p1.cx - br.cx, p1.cy - br.cy);
-        const d2 = Math.hypot(p2.cx - br.cx, p2.cy - br.cy);
-        
-        // Reject tiny configurations — the side length between BR and an adjacent
-        // anchor spans 38 units. With minQuadDiag set to 15% of frame,
-        // each side must be at least minQuadDiag * 0.5 (since diag ≈ side * 1.41).
-        const minSide = minQuadDiag * 0.5;
-        if (d1 < minSide || d2 < minSide) continue;
-
-        // Ratio of side lengths (allow some perspective skew)
-        const ratio = d1 / d2;
-        if (ratio < 0.6 || ratio > 1.6) continue;
-
-        // Angle between the two sides from BR must be ~90 degrees
-        const v1x = p1.cx - br.cx, v1y = p1.cy - br.cy;
-        const v2x = p2.cx - br.cx, v2y = p2.cy - br.cy;
-        const dot = v1x * v2x + v1y * v2y;
-        const cosTheta = dot / (d1 * d2);
-        // cos(60) = 0.5, cos(120) = -0.5. Must be roughly orthogonal.
-        if (Math.abs(cosTheta) > 0.6) continue;
-
-        // Expected TL position (parallelogram rule)
-        const expTLx = br.cx + v1x + v2x;
-        const expTLy = br.cy + v1y + v2y;
-
-        // Find the solid point closest to expected TL
-        let bestTL = null;
-        let bestTLDist = Infinity;
-        for (const p3 of validSolid) {
-          if (p3 === p1 || p3 === p2) continue;
-          const err = Math.hypot(p3.cx - expTLx, p3.cy - expTLy);
-          if (err < bestTLDist) {
-            bestTLDist = err;
-            bestTL = p3;
-          }
-        }
-
-        // Allow TL to deviate by up to 40% of the side length due to perspective
-        const maxErr = ((d1 + d2) / 2) * 0.4;
-        if (bestTLDist < maxErr && bestTL !== null) {
-          const area = quadArea([br, p1, bestTL, p2]);
-          if (area > bestArea) {
-            bestArea = area;
-            bestQuad = { br, p1, p2, tl: bestTL };
+  // Evaluate all combinations of 4 blobs (10 choose 4 = 210 combinations)
+  for (let i = 0; i < topCandidates.length - 3; i++) {
+    for (let j = i + 1; j < topCandidates.length - 2; j++) {
+      for (let k = j + 1; k < topCandidates.length - 1; k++) {
+        for (let l = k + 1; l < topCandidates.length; l++) {
+          const pts = [topCandidates[i], topCandidates[j], topCandidates[k], topCandidates[l]];
+          
+          // Sort clockwise around centroid
+          const cx = (pts[0].cx + pts[1].cx + pts[2].cx + pts[3].cx) / 4;
+          const cy = (pts[0].cy + pts[1].cy + pts[2].cy + pts[3].cy) / 4;
+          pts.sort((a, b) => Math.atan2(a.cy - cy, a.cx - cx) - Math.atan2(b.cy - cy, b.cx - cx));
+          
+          // Compute the 4 side lengths and 2 diagonals
+          const d01 = Math.hypot(pts[1].cx - pts[0].cx, pts[1].cy - pts[0].cy);
+          const d12 = Math.hypot(pts[2].cx - pts[1].cx, pts[2].cy - pts[1].cy);
+          const d23 = Math.hypot(pts[3].cx - pts[2].cx, pts[3].cy - pts[2].cy);
+          const d30 = Math.hypot(pts[0].cx - pts[3].cx, pts[0].cy - pts[3].cy);
+          
+          const diag1 = Math.hypot(pts[2].cx - pts[0].cx, pts[2].cy - pts[0].cy);
+          const diag2 = Math.hypot(pts[3].cx - pts[1].cx, pts[3].cy - pts[1].cy);
+          
+          if (diag1 < minQuadDiag || diag2 < minQuadDiag) continue;
+          
+          // In a perfect square, opposite sides are equal and diagonals are equal.
+          // Under perspective, opposite sides are roughly equal.
+          const oppRatio1 = Math.max(d01 / d23, d23 / d01);
+          const oppRatio2 = Math.max(d12 / d30, d30 / d12);
+          
+          if (oppRatio1 > 2.0 || oppRatio2 > 2.0) continue; // too much perspective distortion
+          
+          const diagRatio = Math.max(diag1 / diag2, diag2 / diag1);
+          if (diagRatio > 2.5) continue;
+          
+          // Minimize the deviation from a perfect square
+          const errorScore = (oppRatio1 - 1.0) + (oppRatio2 - 1.0) + (diagRatio - 1.0);
+          
+          if (errorScore < bestError) {
+            bestError = errorScore;
+            bestQuad = pts;
           }
         }
       }
@@ -322,21 +284,31 @@ function identifyAnchors(candidates, frameW, frameH) {
 
   if (!bestQuad) return null;
 
-  // Final sanity check: quad diagonal must exceed minimum
-  const diagLen = Math.hypot(bestQuad.br.cx - bestQuad.tl.cx, bestQuad.br.cy - bestQuad.tl.cy);
-  if (diagLen < minQuadDiag) return null;
+  // We have the 4 points in clockwise order.
+  // Find the BR anchor: it is the one with the lowest solidity!
+  let minSolidity = Infinity;
+  let brIndex = -1;
+  for (let i = 0; i < 4; i++) {
+    if (bestQuad[i].solidity < minSolidity) {
+      minSolidity = bestQuad[i].solidity;
+      brIndex = i;
+    }
+  }
 
-  const { br, p1, p2, tl } = bestQuad;
-
-  // Determine which of p1, p2 is TR and BL using cross product
-  // Vector from TL to BR
+  const br = bestQuad[brIndex];
+  // TL is diagonally opposite to BR in the sorted array
+  const tl = bestQuad[(brIndex + 2) % 4];
+  
+  // Use cross product to definitively identify TR and BL
+  const p1 = bestQuad[(brIndex + 1) % 4];
+  const p2 = bestQuad[(brIndex + 3) % 4];
+  
   const dx = br.cx - tl.cx;
   const dy = br.cy - tl.cy;
   
   const cross1 = dx * (p1.cy - tl.cy) - dy * (p1.cx - tl.cx);
   const cross2 = dx * (p2.cy - tl.cy) - dy * (p2.cx - tl.cx);
 
-  // In screen coords (Y down), negative cross product is on the right side (TR)
   let tr, bl;
   if (cross1 < cross2) {
     tr = p1; bl = p2;
