@@ -209,8 +209,6 @@ function filterAnchors(blobs, frameW, frameH) {
     if (aspect < 0.33 || aspect > 3.0) return false;
     // Minimum area (reject tiny noise)
     if (b.area < minSide * minSide * 0.3) return false;
-    // Minimum solidity (reject diagonal stripes which have very low solidity)
-    if (b.solidity < 0.40) return false;
     return true;
   });
 }
@@ -219,14 +217,15 @@ function filterAnchors(blobs, frameW, frameH) {
 
 /**
  * From a list of candidates, find the 4 that form the best quadrilateral
- * and identify orientation (hollow anchor = BR).
+ * and identify orientation by finding the pure Blue anchor (BR).
  *
  * @param {Array} candidates — filtered blobs
  * @param {number} frameW — processing frame width
  * @param {number} frameH — processing frame height
+ * @param {Uint8ClampedArray} rgba — original RGBA pixels
  * @returns {{TL:[x,y], TR:[x,y], BL:[x,y], BR:[x,y], pixelsPerUnit:number}}
  */
-function identifyAnchors(candidates, frameW, frameH) {
+function identifyAnchors(candidates, frameW, frameH, rgba) {
   if (candidates.length < 4) return null;
 
   const frameDiag = Math.hypot(frameW, frameH);
@@ -292,12 +291,17 @@ function identifyAnchors(candidates, frameW, frameH) {
   if (!bestQuad) return null;
 
   // We have the 4 points in clockwise order.
-  // Find the BR anchor: it is the one with the lowest solidity!
-  let minSolidity = Infinity;
+  // Find the BR anchor: it is the one that is Blue!
+  let maxBlueTint = -Infinity;
   let brIndex = -1;
   for (let i = 0; i < 4; i++) {
-    if (bestQuad[i].solidity < minSolidity) {
-      minSolidity = bestQuad[i].solidity;
+    const pt = bestQuad[i];
+    const rgb = sampleAreaRGB(rgba, frameW, frameH, pt.cx, pt.cy, 2);
+    // Blue tint: B minus max of (R, G)
+    const blueTint = rgb.b - Math.max(rgb.r, rgb.g);
+    
+    if (blueTint > maxBlueTint) {
+      maxBlueTint = blueTint;
       brIndex = i;
     }
   }

@@ -336,7 +336,7 @@ function decodeLoop() {
   const candidates = filterAnchors(blobs, procW, procH);
 
   // 7. Identify the 4 anchors
-  const anchorsRaw = identifyAnchors(candidates, procW, procH);
+  const anchorsRaw = identifyAnchors(candidates, procW, procH, imageData.data);
 
   // Temporal smoothing: reject detections that jump wildly from the previous frame.
   // This prevents single-frame glitches where data cells form false quads.

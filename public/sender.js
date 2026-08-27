@@ -12,10 +12,10 @@ const TOTAL_UNITS = 98;
 const GRID_ORIGIN = { x: 9, y: 9 };
 
 const ANCHORS = [
-  { x: 3, y: 3,  hollow: false }, // TL
-  { x: 91, y: 3, hollow: false }, // TR
-  { x: 3, y: 91, hollow: false }, // BL
-  { x: 91, y: 91, hollow: true }, // BR — orientation marker
+  { x: 3, y: 3,  color: '#000000' }, // TL
+  { x: 91, y: 3, color: '#000000' }, // TR
+  { x: 3, y: 91, color: '#000000' }, // BL
+  { x: 91, y: 91, color: '#0000FF' }, // BR — Blue orientation marker
 ];
 const ANCHOR_SIZE = 4; // units
 
@@ -57,20 +57,14 @@ function render() {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Draw anchors (always black/white)
+  // Draw anchors
   for (const anchor of ANCHORS) {
     const ax = ox + anchor.x * unit;
     const ay = oy + anchor.y * unit;
     const as = ANCHOR_SIZE * unit;
 
-    ctx.fillStyle = '#000000';
+    ctx.fillStyle = anchor.color;
     ctx.fillRect(ax, ay, as, as);
-
-    if (anchor.hollow) {
-      const inset = as * 0.15; // Increased from 0.25 to make the white hole larger and more robust
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(ax + inset, ay + inset, as - 2 * inset, as - 2 * inset);
-    }
   }
 
   // Draw 32x32 RGB data grid
