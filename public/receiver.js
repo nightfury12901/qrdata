@@ -402,30 +402,48 @@ function decodeLoop() {
           }
         } 
         else if (frame.flags === 3 /* FLAG_FOUNTAIN_DATA */ && totalChunks && !reassemblyComplete) {
-          // GF(2) Gaussian Elimination step
+          // GF(2) Gaussian Elimination using 32-bit words for extreme speed
           const indices = getFountainIndices(frame.seq, totalChunks);
-          const coeff = new Uint8Array(totalChunks);
-          for (let idx of indices) coeff[idx] = 1;
-          const rowPayload = new Uint8Array(frame.payload);
+          
+          const coeffWords = Math.ceil(totalChunks / 32);
+          const coeff32 = new Uint32Array(coeffWords);
+          for (let idx of indices) {
+            coeff32[idx >> 5] |= (1 << (idx & 31));
+          }
+          
+          // Pad payload to multiple of 4 bytes for 32-bit XOR
+          const payloadWords = Math.ceil(frame.payload.length / 4);
+          const paddedPayload = new Uint8Array(payloadWords * 4);
+          paddedPayload.set(frame.payload);
+          const payload32 = new Uint32Array(paddedPayload.buffer);
           
           let added = false;
           for (let i = 0; i < totalChunks; i++) {
-            if (coeff[i] === 1) {
+            // Check if variable i is 1
+            if ((coeff32[i >> 5] & (1 << (i & 31))) !== 0) {
               if (matrix[i]) {
-                // Eliminate
-                for (let j = i; j < totalChunks; j++) coeff[j] ^= matrix[i].coeff[j];
-                for (let j = 0; j < rowPayload.length; j++) rowPayload[j] ^= matrix[i].payload[j];
+                // Eliminate using existing pivot
+                for (let j = (i >> 5); j < coeffWords; j++) coeff32[j] ^= matrix[i].coeff32[j];
+                for (let j = 0; j < payloadWords; j++) payload32[j] ^= matrix[i].payload32[j];
               } else {
-                // Found new pivot
-                matrix[i] = { coeff, payload: rowPayload };
+                // Found new pivot!
+                // First, completely reduce this new row using any existing pivots > i
+                for (let m = i + 1; m < totalChunks; m++) {
+                  if ((coeff32[m >> 5] & (1 << (m & 31))) !== 0 && matrix[m]) {
+                    for (let j = (m >> 5); j < coeffWords; j++) coeff32[j] ^= matrix[m].coeff32[j];
+                    for (let j = 0; j < payloadWords; j++) payload32[j] ^= matrix[m].payload32[j];
+                  }
+                }
+                
+                matrix[i] = { coeff32, payload32 };
                 rank++;
                 added = true;
                 
-                // Back-substitute upwards to maintain Reduced Row Echelon Form
+                // Back-substitute upwards to reduce existing rows
                 for (let k = 0; k < i; k++) {
-                  if (matrix[k] && matrix[k].coeff[i] === 1) {
-                    for (let j = i; j < totalChunks; j++) matrix[k].coeff[j] ^= coeff[j];
-                    for (let j = 0; j < rowPayload.length; j++) matrix[k].payload[j] ^= rowPayload[j];
+                  if (matrix[k] && (matrix[k].coeff32[i >> 5] & (1 << (i & 31))) !== 0) {
+                    for (let j = (i >> 5); j < coeffWords; j++) matrix[k].coeff32[j] ^= coeff32[j];
+                    for (let j = 0; j < payloadWords; j++) matrix[k].payload32[j] ^= payload32[j];
                   }
                 }
                 break;
@@ -439,7 +457,9 @@ function decodeLoop() {
             // Reassemble the file
             const fullPayload = new Uint8Array(totalChunks * MAX_PAYLOAD_SIZE);
             for (let i = 0; i < totalChunks; i++) {
-              fullPayload.set(matrix[i].payload, i * MAX_PAYLOAD_SIZE);
+              // Extract the exact payload size back from the 32-bit array
+              const p8 = new Uint8Array(matrix[i].payload32.buffer).slice(0, MAX_PAYLOAD_SIZE);
+              fullPayload.set(p8, i * MAX_PAYLOAD_SIZE);
             }
             
             // Truncate to exact file size
