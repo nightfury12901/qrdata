@@ -306,14 +306,15 @@ speedSlider.addEventListener('input', () => {
   speedLabel.textContent = `${speedSlider.value}ms`;
 });
 
-// Default rainbow pattern to show off RGB mode
+// Default pattern: Random static to prevent structured blobs
 for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
   const row = Math.floor(i / GRID_SIZE);
   const col = i % GRID_SIZE;
-  // Create a colorful pattern: cycle through all 8 colors
-  const colorIdx = (row + col) % 8;
-  patternR[i] = (colorIdx >> 2) & 1;
-  patternG[i] = (colorIdx >> 1) & 1;
-  patternB[i] = colorIdx & 1;
+  const mask = (row + col) % 2;
+  
+  // Random color bits XORed with spatial mask
+  patternR[i] = (Math.random() > 0.5 ? 1 : 0) ^ mask;
+  patternG[i] = (Math.random() > 0.5 ? 1 : 0) ^ mask;
+  patternB[i] = (Math.random() > 0.5 ? 1 : 0) ^ mask;
 }
 render();

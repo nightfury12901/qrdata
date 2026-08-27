@@ -209,6 +209,8 @@ function filterAnchors(blobs, frameW, frameH) {
     if (aspect < 0.33 || aspect > 3.0) return false;
     // Minimum area (reject tiny noise)
     if (b.area < minSide * minSide * 0.3) return false;
+    // Minimum solidity (reject diagonal stripes which have very low solidity)
+    if (b.solidity < 0.40) return false;
     return true;
   });
 }
