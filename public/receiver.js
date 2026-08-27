@@ -73,6 +73,7 @@ if (btnReset) {
     firstValidFrameTime = null;
     reassemblyComplete = false;
     currentFileToDownload = null;
+    maxSeqReceived = -1;
     statMessage.value = 'Waiting for frames...';
     
     const statProgressText = document.getElementById('statProgressText');
@@ -178,48 +179,59 @@ let fileMeta = null;
 let firstValidFrameTime = null;
 let reassemblyComplete = false;
 let currentFileToDownload = null;
+let maxSeqReceived = -1;
 
 // ---- Audio NACK / ACK ----
 let audioCtx = null;
-let lastNackTime = 0;
+let nackOsc = null;
+let nackGain = null;
 
-function playAudioCommand(type, chunkIndex = 0) {
+function playAudioCommand(type) {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
-  
   const now = audioCtx.currentTime;
-  let freqs = [];
-  let duration = 0.2;
   
   if (type === 'ACK') {
-    freqs = [19500];
-    duration = 0.5;
-  } else if (type === 'NACK') {
-    freqs = [
-      15000 + (chunkIndex % 10) * 100,
-      16000 + Math.floor((chunkIndex / 10) % 10) * 100,
-      17000 + Math.floor((chunkIndex / 100) % 10) * 100,
-      18000 + Math.floor((chunkIndex / 1000) % 10) * 100
-    ];
-  }
-  
-  const gainNode = audioCtx.createGain();
-  gainNode.connect(audioCtx.destination);
-  
-  // Envelope to prevent clicking
-  gainNode.gain.setValueAtTime(0, now);
-  gainNode.gain.linearRampToValueAtTime(1.0 / freqs.length, now + 0.05);
-  gainNode.gain.setValueAtTime(1.0 / freqs.length, now + duration - 0.05);
-  gainNode.gain.linearRampToValueAtTime(0, now + duration);
-  
-  for (const f of freqs) {
+    setNackTone(false); // Stop NACK if it was running
+    const gainNode = audioCtx.createGain();
+    gainNode.connect(audioCtx.destination);
+    gainNode.gain.setValueAtTime(0, now);
+    gainNode.gain.linearRampToValueAtTime(1.0, now + 0.05);
+    gainNode.gain.setValueAtTime(1.0, now + 0.45);
+    gainNode.gain.linearRampToValueAtTime(0, now + 0.5);
+    
     const osc = audioCtx.createOscillator();
     osc.type = 'sine';
-    osc.frequency.value = f;
+    osc.frequency.value = 19500;
     osc.connect(gainNode);
     osc.start(now);
-    osc.stop(now + duration);
+    osc.stop(now + 0.5);
+  }
+}
+
+function setNackTone(active) {
+  if (!audioCtx) {
+    if (!active) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  
+  if (active && !nackOsc) {
+    nackGain = audioCtx.createGain();
+    nackGain.gain.value = 0.5;
+    nackGain.connect(audioCtx.destination);
+    
+    nackOsc = audioCtx.createOscillator();
+    nackOsc.type = 'sine';
+    nackOsc.frequency.value = 18000;
+    nackOsc.connect(nackGain);
+    nackOsc.start();
+  } else if (!active && nackOsc) {
+    nackOsc.stop();
+    nackOsc.disconnect();
+    nackGain.disconnect();
+    nackOsc = null;
+    nackGain = null;
   }
 }
 
@@ -432,6 +444,10 @@ function decodeLoop() {
         stats.validFrames++;
         stats.totalErrorsCorrected += frame.errorsCorrected;
         
+        if (frame.seq > maxSeqReceived) {
+          maxSeqReceived = frame.seq;
+        }
+        
         if (frame.flags === 1 /* FLAG_FILE_META */ && !fileMeta) {
           try {
             const metaJson = new TextDecoder().decode(frame.payload);
@@ -595,20 +611,12 @@ function decodeLoop() {
   drawOverlay(anchors, stats.lastCells);
 
   // ---- Audio NACK checks ----
-  const now = performance.now();
-  if (totalChunks && !reassemblyComplete && fileMeta && (now - lastNackTime > 500)) {
-    // Find the first missing chunk
-    let missingIdx = -1;
-    for (let i = 0; i < totalChunks; i++) {
-      if (!matrix[i]) {
-        missingIdx = i;
-        break;
-      }
-    }
-    if (missingIdx !== -1) {
-      playAudioCommand('NACK', missingIdx);
-      lastNackTime = now;
-    }
+  if (totalChunks && !reassemblyComplete && fileMeta) {
+    const expectedRank = Math.min(maxSeqReceived + 1, totalChunks);
+    const needsNack = rank < expectedRank;
+    setNackTone(needsNack);
+  } else {
+    setNackTone(false);
   }
 
   // ---- Schedule next frame ----

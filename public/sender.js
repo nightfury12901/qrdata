@@ -33,7 +33,7 @@ let fountainSeq = 0;
 // Audio NACK/ACK state
 let audioCtx = null;
 let analyser = null;
-let forceNextSeq = null;
+let isNackActive = false;
 let audioListenLoopId = null;
 
 // ---- Canvas rendering ----
@@ -67,7 +67,7 @@ function render() {
     ctx.fillRect(ax, ay, as, as);
 
     if (anchor.hollow) {
-      const inset = as * 0.25;
+      const inset = as * 0.15; // Increased from 0.25 to make the white hole larger and more robust
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(ax + inset, ay + inset, as - 2 * inset, as - 2 * inset);
     }
@@ -160,25 +160,14 @@ function analyzeAudio() {
     return;
   }
   
-  // Check for NACK
-  const p1 = getPeak(14900, 16000);
-  const p2 = getPeak(15900, 17000);
-  const p3 = getPeak(16900, 18000);
-  const p4 = getPeak(17900, 19000);
+  // Check for NACK (18kHz band)
+  const nackPeak = getPeak(17500, 18500);
   
-  if (p1.val > threshold && p2.val > threshold && p3.val > threshold && p4.val > threshold) {
-    const d1 = Math.round((p1.freq - 15000) / 100);
-    const d2 = Math.round((p2.freq - 16000) / 100);
-    const d3 = Math.round((p3.freq - 17000) / 100);
-    const d4 = Math.round((p4.freq - 18000) / 100);
-    
-    if (d1 >= 0 && d1 <= 9 && d2 >= 0 && d2 <= 9 && d3 >= 0 && d3 <= 9 && d4 >= 0 && d4 <= 9) {
-      const missingIdx = d4 * 1000 + d3 * 100 + d2 * 10 + d1;
-      if (missingIdx < sourceChunks.length) {
-        console.log(`[Audio NACK] Receiver requested chunk ${missingIdx}`);
-        forceNextSeq = missingIdx;
-      }
-    }
+  if (nackPeak.val > threshold) {
+    if (!isNackActive) console.log("[Audio NACK] Receiver requested fountain packets!");
+    isNackActive = true;
+  } else {
+    isNackActive = false;
   }
 }
 
@@ -255,14 +244,18 @@ function startBroadcast() {
 
   const speedMs = parseInt(document.getElementById('speedSlider').value);
   fountainSeq = 0; // start fountain seq at 0 for systematic transmission
+  let nackFountainSeq = sourceChunks.length; // start sending fountain packets from here if NACKed
 
   txInterval = setInterval(() => {
-    let currentSeq = fountainSeq;
-    if (forceNextSeq !== null) {
-      currentSeq = forceNextSeq;
-      forceNextSeq = null; // reset
+    let currentSeq;
+    if (isNackActive) {
+      currentSeq = nackFountainSeq++;
+      document.getElementById('txStatus').textContent = 'Broadcasting (Auto-Healing)...';
+      document.getElementById('txStatus').className = 'value warn';
     } else {
-      fountainSeq++;
+      currentSeq = fountainSeq++;
+      document.getElementById('txStatus').textContent = 'Broadcasting...';
+      document.getElementById('txStatus').className = 'value';
     }
 
     // 1. Get indices for this sequence number

@@ -239,9 +239,9 @@ function identifyAnchors(candidates, frameW, frameH) {
   const hollow = [];
   const solid = [];
   for (const c of candidates) {
-    if (c.solidity >= 0.55 && c.solidity <= 0.88) {
+    if (c.solidity >= 0.35 && c.solidity <= 0.92) {
       hollow.push(c);
-    } else if (c.solidity > 0.88) {
+    } else if (c.solidity > 0.92) {
       solid.push(c);
     }
   }
