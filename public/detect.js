@@ -232,14 +232,14 @@ function identifyAnchors(candidates, frameW, frameH) {
   const frameDiag = Math.hypot(frameW, frameH);
   const minQuadDiag = frameDiag * 0.15;
 
-  // Sort candidates by area descending and take top 10 to ignore tiny noise
+  // Sort candidates by area descending and take top 25 to ensure all 4 anchors are included
   candidates.sort((a, b) => b.area - a.area);
-  const topCandidates = candidates.slice(0, 10);
+  const topCandidates = candidates.slice(0, 25);
 
   let bestQuad = null;
   let bestScore = -Infinity;
 
-  // Evaluate all combinations of 4 blobs (10 choose 4 = 210 combinations)
+  // Evaluate all combinations of 4 blobs (25 choose 4 = 12,650 combinations)
   for (let i = 0; i < topCandidates.length - 3; i++) {
     for (let j = i + 1; j < topCandidates.length - 2; j++) {
       for (let k = j + 1; k < topCandidates.length - 1; k++) {
@@ -267,10 +267,10 @@ function identifyAnchors(candidates, frameW, frameH) {
           const oppRatio1 = Math.max(d01 / d23, d23 / d01);
           const oppRatio2 = Math.max(d12 / d30, d30 / d12);
           
-          if (oppRatio1 > 2.0 || oppRatio2 > 2.0) continue; // too much perspective distortion
+          if (oppRatio1 > 1.3 || oppRatio2 > 1.3) continue; // too much perspective distortion (must be < 30% difference)
           
           const diagRatio = Math.max(diag1 / diag2, diag2 / diag1);
-          if (diagRatio > 2.5) continue;
+          if (diagRatio > 1.3) continue;
           
           // We want the LARGEST quad that is also as SQUARE as possible.
           // Calculate how distorted the quad is (0.0 = perfect square)
