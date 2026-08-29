@@ -255,8 +255,18 @@ function startBroadcast() {
   const speedMs = parseInt(document.getElementById('speedSlider').value);
   fountainSeq = 0; // start fountain seq at 0 for systematic transmission
   let nackFountainSeq = sourceChunks.length; // start sending fountain packets from here if NACKed
+  let tickCount = 0;
 
   txInterval = setInterval(() => {
+    tickCount++;
+    // Interleave the handshake frame every 16 ticks so the receiver can join anytime
+    if (tickCount % 16 === 1) {
+      loadBlocksToPattern(metadataFrameBlocks);
+      render();
+      document.getElementById('txFrame').textContent = `Frame: Handshake`;
+      return;
+    }
+
     let currentSeq;
     if (isNackActive) {
       currentSeq = nackFountainSeq++;
