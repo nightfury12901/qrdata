@@ -11,18 +11,14 @@
 
 // ---- Grayscale conversion ----
 
-/**
- * Convert RGBA pixel data to grayscale.
- * @param {Uint8ClampedArray} rgba — RGBA pixel data (4 bytes per pixel)
- * @param {number} count — number of pixels (width × height)
- * @returns {Uint8Array} grayscale values (1 byte per pixel)
- */
 function toGrayscale(rgba, count) {
   const gray = new Uint8Array(count);
   for (let i = 0; i < count; i++) {
     const off = i * 4;
-    // ITU-R BT.601 luma weights
-    gray[i] = (rgba[off] * 77 + rgba[off + 1] * 150 + rgba[off + 2] * 29) >> 8;
+    // We want anchors (Black) to be dark, and EVERYTHING else to be light.
+    // By taking the max of RGB, any color (Red, Green, Blue, White) becomes ~255.
+    // Only Black remains ~0.
+    gray[i] = Math.max(rgba[off], rgba[off + 1], rgba[off + 2]);
   }
   return gray;
 }

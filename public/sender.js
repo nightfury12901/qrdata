@@ -7,15 +7,15 @@
  */
 
 // ---- Layout constants (unit coordinates) ----
-const GRID_SIZE = 80;
-const TOTAL_UNITS = 98;
+const GRID_SIZE = 40;
+const TOTAL_UNITS = 58;
 const GRID_ORIGIN = { x: 9, y: 9 };
 
 const ANCHORS = [
   { x: 3, y: 3,  color: '#000000' }, // TL
-  { x: 91, y: 3, color: '#000000' }, // TR
-  { x: 3, y: 91, color: '#000000' }, // BL
-  { x: 91, y: 91, color: '#0000FF' }, // BR — Blue orientation marker
+  { x: 51, y: 3, color: '#000000' }, // TR
+  { x: 3, y: 51, color: '#000000' }, // BL
+  { x: 51, y: 51, color: '#000000' }, // BR — Blue orientation dot added below
 ];
 const ANCHOR_SIZE = 4; // units
 
@@ -65,6 +65,12 @@ function render() {
 
     ctx.fillStyle = anchor.color;
     ctx.fillRect(ax, ay, as, as);
+    
+    // Draw blue orientation dot in the BR anchor
+    if (anchor.x === 51 && anchor.y === 51) {
+      ctx.fillStyle = '#0000FF';
+      ctx.fillRect(ax + unit, ay + unit, 2 * unit, 2 * unit);
+    }
   }
 
   // Draw 32x32 RGB data grid
@@ -85,8 +91,8 @@ function render() {
 
 // Load 3 RS-encoded blocks into the RGB pattern arrays
 function loadBlocksToPattern(blocks) {
-  const [rBlock, gBlock, bBlock] = blocks; // each block is 800 bytes
-  for (let i = 0; i < 800; i++) {
+  const [rBlock, gBlock, bBlock] = blocks; // each block is 200 bytes
+  for (let i = 0; i < 200; i++) {
     for (let bit = 0; bit < 8; bit++) {
       const cellIdx = i * 8 + bit;
       if (cellIdx >= GRID_SIZE * GRID_SIZE) break;

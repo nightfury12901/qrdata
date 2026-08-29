@@ -19,7 +19,7 @@ function crc8(data) {
 }
 
 // ---- Layout constants ----
-const BLOCKS_PER_CHANNEL = 4;
+const BLOCKS_PER_CHANNEL = 1;
 const BLOCK_SIZE = 200;        // bytes per RS block
 const ECC_SIZE = 32;           // RS parity bytes per block
 const DATA_PER_BLOCK = BLOCK_SIZE - ECC_SIZE; // 168 data bytes per block
