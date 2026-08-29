@@ -10,17 +10,17 @@
  */
 
 // ---- Layout constants (must match sender.js) ----
-const GRID_SIZE = 40;
-const TOTAL_UNITS = 58;
+const GRID_SIZE = 74;
+const TOTAL_UNITS = 92;
 const GRID_ORIGIN_X = 9;
 const GRID_ORIGIN_Y = 9;
 
 // Ideal anchor centers in unit coordinates
 const IDEAL_ANCHORS = {
   TL: [5, 5],
-  TR: [53, 5],
-  BL: [5, 53],
-  BR: [53, 53],
+  TR: [87, 5],
+  BL: [5, 87],
+  BR: [87, 87],
 };
 
 // Ideal cell centers
@@ -387,48 +387,56 @@ function decodeLoop() {
         cellB[i] = rgb.b;
       }
 
-      // LOCAL threshold per channel: midpoint of min/max brightness across all cells.
-      // This automatically adapts to colored lighting and screen white balance.
-      let minR = 255, maxR = 0, minG = 255, maxG = 0, minB = 255, maxB = 0;
-      for (let i = 0; i < numCells; i++) {
-        if (cellR[i] < minR) minR = cellR[i];
-        if (cellR[i] > maxR) maxR = cellR[i];
-        if (cellG[i] < minG) minG = cellG[i];
-        if (cellG[i] > maxG) maxG = cellG[i];
-        if (cellB[i] < minB) minB = cellB[i];
-        if (cellB[i] > maxB) maxB = cellB[i];
+      // 9. Read calibration cells (first 4 cells)
+      const calR = [0,0,0,0], calG = [0,0,0,0], calB = [0,0,0,0];
+      for (let i = 0; i < 4; i++) {
+        const [idealX, idealY] = IDEAL_CELLS[i];
+        const camPt = projectPoint(H, idealX, idealY);
+        const rgb = sampleAreaRGB(imageData.data, procW, procH, camPt.x, camPt.y, sampleR);
+        calR[i] = rgb.r;
+        calG[i] = rgb.g;
+        calB[i] = rgb.b;
       }
       
-      const threshR = (minR + maxR) / 2;
-      const threshG = (minG + maxG) / 2;
-      const threshB = (minB + maxB) / 2;
+      // Calculate 3 thresholds for each channel to separate 0, 1, 2, 3
+      const threshR = [(calR[0]+calR[1])/2, (calR[1]+calR[2])/2, (calR[2]+calR[3])/2];
+      const threshG = [(calG[0]+calG[1])/2, (calG[1]+calG[2])/2, (calG[2]+calG[3])/2];
+      const threshB = [(calB[0]+calB[1])/2, (calB[1]+calB[2])/2, (calB[2]+calB[3])/2];
 
-      const bitsR = new Uint8Array(numCells);
-      const bitsG = new Uint8Array(numCells);
-      const bitsB = new Uint8Array(numCells);
+      const getLevel = (v, t) => v < t[0] ? 0 : (v < t[1] ? 1 : (v < t[2] ? 2 : 3));
+
+      // 10. Extract data bits (skip 4 calibration cells)
+      const bitsR = new Uint8Array(5472);
+      const bitsG = new Uint8Array(5472);
+      const bitsB = new Uint8Array(5472);
       
-      for (let i = 0; i < numCells; i++) {
-        const row = Math.floor(i / GRID_SIZE);
-        const col = i % GRID_SIZE;
-        const mask = (row + col) % 2; // unmask spatial checkerboard
+      for (let i = 0; i < 5472; i++) {
+        const cellIdx = i + 4;
+        const row = Math.floor(cellIdx / GRID_SIZE);
+        const col = cellIdx % GRID_SIZE;
+        const mask = ((row + col) % 2) * 3; // 0 or 3
         
-        bitsR[i] = (cellR[i] > threshR ? 1 : 0) ^ mask;
-        bitsG[i] = (cellG[i] > threshG ? 1 : 0) ^ mask;
-        bitsB[i] = (cellB[i] > threshB ? 1 : 0) ^ mask;
+        const [idealX, idealY] = IDEAL_CELLS[cellIdx];
+        const camPt = projectPoint(H, idealX, idealY);
+        const rgb = sampleAreaRGB(imageData.data, procW, procH, camPt.x, camPt.y, sampleR);
+        
+        bitsR[i] = getLevel(rgb.r, threshR) ^ mask;
+        bitsG[i] = getLevel(rgb.g, threshG) ^ mask;
+        bitsB[i] = getLevel(rgb.b, threshB) ^ mask;
       }
 
-      // 10. Convert bits to 200 bytes per channel
-      const rBlock = new Uint8Array(200);
-      const gBlock = new Uint8Array(200);
-      const bBlock = new Uint8Array(200);
+      // 11. Pack bits into byte blocks
+      const rBlock = new Uint8Array(1368);
+      const gBlock = new Uint8Array(1368);
+      const bBlock = new Uint8Array(1368);
       
-      for (let i = 0; i < 200; i++) {
+      for (let i = 0; i < 1368; i++) {
         let byteR = 0, byteG = 0, byteB = 0;
-        for (let bit = 0; bit < 8; bit++) {
-          const idx = i * 8 + bit;
-          byteR = (byteR << 1) | bitsR[idx];
-          byteG = (byteG << 1) | bitsG[idx];
-          byteB = (byteB << 1) | bitsB[idx];
+        for (let j = 0; j < 4; j++) {
+          const idx = i * 4 + j;
+          byteR = (byteR << 2) | bitsR[idx];
+          byteG = (byteG << 2) | bitsG[idx];
+          byteB = (byteB << 2) | bitsB[idx];
         }
         rBlock[i] = byteR;
         gBlock[i] = byteG;

@@ -19,15 +19,15 @@ function crc8(data) {
 }
 
 // ---- Layout constants ----
-const BLOCKS_PER_CHANNEL = 1;
-const BLOCK_SIZE = 200;        // bytes per RS block
-const ECC_SIZE = 32;           // RS parity bytes per block
-const DATA_PER_BLOCK = BLOCK_SIZE - ECC_SIZE; // 168 data bytes per block
+const BLOCKS_PER_CHANNEL = 6;
+const BLOCK_SIZE = 228;        // bytes per RS block
+const ECC_SIZE = 38;           // RS parity bytes per block
+const DATA_PER_BLOCK = BLOCK_SIZE - ECC_SIZE; // 190 data bytes per block
 const NUM_CHANNELS = 3;        // R, G, B
-const TOTAL_DATA = DATA_PER_BLOCK * BLOCKS_PER_CHANNEL * NUM_CHANNELS; // 2016 bytes total data
+const TOTAL_DATA = DATA_PER_BLOCK * BLOCKS_PER_CHANNEL * NUM_CHANNELS; // 3420 bytes total data
 const HEADER_SIZE = 5;         // seq(2) + length(2) + flags(1)
 const FOOTER_SIZE = 1;         // CRC-8
-const MAX_PAYLOAD_SIZE = TOTAL_DATA - HEADER_SIZE - FOOTER_SIZE; // 2010 bytes
+const MAX_PAYLOAD_SIZE = TOTAL_DATA - HEADER_SIZE - FOOTER_SIZE; // 3414 bytes
 
 // Protocol Flags
 const FLAG_TEXT = 0;

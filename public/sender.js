@@ -7,15 +7,15 @@
  */
 
 // ---- Layout constants (unit coordinates) ----
-const GRID_SIZE = 40;
-const TOTAL_UNITS = 58;
+const GRID_SIZE = 74;
+const TOTAL_UNITS = 92;
 const GRID_ORIGIN = { x: 9, y: 9 };
 
 const ANCHORS = [
   { x: 3, y: 3,  color: '#000000' }, // TL
-  { x: 51, y: 3, color: '#000000' }, // TR
-  { x: 3, y: 51, color: '#000000' }, // BL
-  { x: 51, y: 51, color: '#000000' }, // BR — Blue orientation dot added below
+  { x: 85, y: 3, color: '#000000' }, // TR
+  { x: 3, y: 85, color: '#000000' }, // BL
+  { x: 85, y: 85, color: '#000000' }, // BR — Blue orientation dot added below
 ];
 const ANCHOR_SIZE = 4; // units
 
@@ -67,7 +67,7 @@ function render() {
     ctx.fillRect(ax, ay, as, as);
     
     // Draw blue orientation dot in the BR anchor
-    if (anchor.x === 51 && anchor.y === 51) {
+    if (anchor.x === 85 && anchor.y === 85) {
       ctx.fillStyle = '#0000FF';
       ctx.fillRect(ax + unit, ay + unit, 2 * unit, 2 * unit);
     }
@@ -77,9 +77,9 @@ function render() {
   for (let row = 0; row < GRID_SIZE; row++) {
     for (let col = 0; col < GRID_SIZE; col++) {
       const idx = row * GRID_SIZE + col;
-      const r = patternR[idx] * 255;
-      const g = patternG[idx] * 255;
-      const b = patternB[idx] * 255;
+      const r = patternR[idx] * 85;
+      const g = patternG[idx] * 85;
+      const b = patternB[idx] * 85;
 
       const cx = ox + (GRID_ORIGIN.x + col) * unit;
       const cy = oy + (GRID_ORIGIN.y + row) * unit;
@@ -91,20 +91,28 @@ function render() {
 
 // Load 3 RS-encoded blocks into the RGB pattern arrays
 function loadBlocksToPattern(blocks) {
-  const [rBlock, gBlock, bBlock] = blocks; // each block is 200 bytes
-  for (let i = 0; i < 200; i++) {
-    for (let bit = 0; bit < 8; bit++) {
-      const cellIdx = i * 8 + bit;
-      if (cellIdx >= GRID_SIZE * GRID_SIZE) break;
-      
-      const row = Math.floor(cellIdx / GRID_SIZE);
-      const col = cellIdx % GRID_SIZE;
-      const mask = (row + col) % 2; // spatial mask prevents false anchors
-      
-      patternR[cellIdx] = ((rBlock[i] >> (7 - bit)) & 1) ^ mask;
-      patternG[cellIdx] = ((gBlock[i] >> (7 - bit)) & 1) ^ mask;
-      patternB[cellIdx] = ((bBlock[i] >> (7 - bit)) & 1) ^ mask;
-    }
+  const [rBlock, gBlock, bBlock] = blocks; // each block is 1368 bytes
+  
+  // Calibration cells (unmasked) for the receiver to measure brightness levels
+  patternR[0] = 0; patternG[0] = 0; patternB[0] = 0;
+  patternR[1] = 1; patternG[1] = 1; patternB[1] = 1;
+  patternR[2] = 2; patternG[2] = 2; patternB[2] = 2;
+  patternR[3] = 3; patternG[3] = 3; patternB[3] = 3;
+
+  for (let i = 0; i < 5472; i++) {
+    const cellIdx = i + 4; // Skip the 4 calibration cells
+    const row = Math.floor(cellIdx / GRID_SIZE);
+    const col = cellIdx % GRID_SIZE;
+    
+    // Spatial mask to prevent large uniform blocks (0 or 3)
+    const mask = ((row + col) % 2) * 3; 
+    
+    const byteIdx = Math.floor(i / 4);
+    const shift = 6 - (i % 4) * 2; // extracts 2 bits at a time from MSB to LSB
+    
+    patternR[cellIdx] = ((rBlock[byteIdx] >> shift) & 3) ^ mask;
+    patternG[cellIdx] = ((gBlock[byteIdx] >> shift) & 3) ^ mask;
+    patternB[cellIdx] = ((bBlock[byteIdx] >> shift) & 3) ^ mask;
   }
 }
 
