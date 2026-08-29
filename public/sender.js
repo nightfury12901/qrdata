@@ -66,10 +66,11 @@ function render() {
     ctx.fillStyle = anchor.color;
     ctx.fillRect(ax, ay, as, as);
     
-    // Draw blue orientation dot in the BR anchor
+    // Draw blue orientation dot OUTSIDE the BR anchor in the margin (at unit 89, 89)
+    // This keeps the anchor purely black so the detector doesn't break.
     if (anchor.x === 85 && anchor.y === 85) {
       ctx.fillStyle = '#0000FF';
-      ctx.fillRect(ax + unit, ay + unit, 2 * unit, 2 * unit);
+      ctx.fillRect(ox + 89 * unit, oy + 89 * unit, 2 * unit, 2 * unit);
     }
   }
 
@@ -77,9 +78,10 @@ function render() {
   for (let row = 0; row < GRID_SIZE; row++) {
     for (let col = 0; col < GRID_SIZE; col++) {
       const idx = row * GRID_SIZE + col;
-      const r = patternR[idx] * 85;
-      const g = patternG[idx] * 85;
-      const b = patternB[idx] * 85;
+      // Map 0, 1, 2, 3 to 85, 141, 197, 253 to guarantee they are strictly lighter than the black anchors
+      const r = 85 + patternR[idx] * 56;
+      const g = 85 + patternG[idx] * 56;
+      const b = 85 + patternB[idx] * 56;
 
       const cx = ox + (GRID_ORIGIN.x + col) * unit;
       const cy = oy + (GRID_ORIGIN.y + row) * unit;

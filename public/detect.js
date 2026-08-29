@@ -287,12 +287,26 @@ function identifyAnchors(candidates, frameW, frameH, rgba) {
   if (!bestQuad) return null;
 
   // We have the 4 points in clockwise order.
-  // Find the BR anchor: it is the one that is Blue!
+  // Find the BR anchor: it is the one with the blue dot just outside of it!
+  const quadCenter = {
+    x: (bestQuad[0].cx + bestQuad[1].cx + bestQuad[2].cx + bestQuad[3].cx) / 4,
+    y: (bestQuad[0].cy + bestQuad[1].cy + bestQuad[2].cy + bestQuad[3].cy) / 4
+  };
+
   let maxBlueTint = -Infinity;
   let brIndex = -1;
   for (let i = 0; i < 4; i++) {
     const pt = bestQuad[i];
-    const rgb = sampleAreaRGB(rgba, frameW, frameH, pt.cx, pt.cy, 2);
+    
+    // The blue dot is located in the quiet zone margin, outside the anchor.
+    // By stepping outwards from the grid center by ~5% of the anchor's distance,
+    // we land perfectly on the blue dot without it interfering with the black anchor.
+    const vx = pt.cx - quadCenter.x;
+    const vy = pt.cy - quadCenter.y;
+    const sampleX = pt.cx + vx * 0.05;
+    const sampleY = pt.cy + vy * 0.05;
+
+    const rgb = sampleAreaRGB(rgba, frameW, frameH, sampleX, sampleY, 2);
     // Blue tint: B minus max of (R, G)
     const blueTint = rgb.b - Math.max(rgb.r, rgb.g);
     
