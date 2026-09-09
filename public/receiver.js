@@ -374,8 +374,9 @@ function decodeLoop() {
       const cellB = new Float64Array(numCells);
       const cellPositions = [];
 
-      // Adaptive sample radius based on pixels-per-unit
-      const sampleR = Math.max(1, Math.round(anchors.pixelsPerUnit * 0.2));
+      // Adaptive sample radius: sample a larger area to average out screen moire patterns,
+      // but ensure we don't bleed into neighboring cells.
+      const sampleR = Math.floor(anchors.pixelsPerUnit * 0.25);
 
       for (let i = 0; i < numCells; i++) {
         const [idealX, idealY] = IDEAL_CELLS[i];
