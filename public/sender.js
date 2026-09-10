@@ -44,7 +44,7 @@ function render() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
 
-  const topReserved = 100;
+  const topReserved = 180;
   const availHeight = canvas.height - topReserved;
 
   const patternPx = Math.min(canvas.width, availHeight) * 0.85;
@@ -66,11 +66,13 @@ function render() {
     ctx.fillStyle = anchor.color;
     ctx.fillRect(ax, ay, as, as);
     
-    // Add a blue dot in the quiet zone diagonally outwards to identify orientation
-    const dx = Math.sign(anchor.x - 46);
-    const dy = Math.sign(anchor.y - 46);
-    ctx.fillStyle = '#0000FF';
-    ctx.fillRect(ox + (anchor.x + dx * 4) * unit, oy + (anchor.y + dy * 4) * unit, 2 * unit, 2 * unit);
+    // Only draw the blue orientation dot for the Top-Right anchor (TR)
+    if (anchor.x === 85 && anchor.y === 3) {
+      const dx = Math.sign(anchor.x - 46);
+      const dy = Math.sign(anchor.y - 46);
+      ctx.fillStyle = '#0000FF';
+      ctx.fillRect(ox + (anchor.x + dx * 4) * unit, oy + (anchor.y + dy * 4) * unit, 2 * unit, 2 * unit);
+    }
   }
 
   // Draw 32x32 RGB data grid
