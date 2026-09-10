@@ -66,13 +66,11 @@ function render() {
     ctx.fillStyle = anchor.color;
     ctx.fillRect(ax, ay, as, as);
     
-    // Only draw the blue orientation dot for the Top-Right anchor (TR)
-    // The TR anchor is at x=85, y=3 (top-left of its 4x4 box). Its center is at 87, 5.
-    // We draw the 2x2 blue dot exactly at the diagonal outward position (+5, -5) from the center.
-    // Center of blue dot = 92, 0. Top-left of blue dot = 91, -1.
-    if (anchor.x === 85 && anchor.y === 3) {
+    // Draw blue orientation dot OUTSIDE the BR anchor in the margin (at unit 89, 89)
+    // This keeps the anchor purely black so the detector doesn't break.
+    if (anchor.x === 85 && anchor.y === 85) {
       ctx.fillStyle = '#0000FF';
-      ctx.fillRect(ox + 91 * unit, oy - 1 * unit, 2 * unit, 2 * unit);
+      ctx.fillRect(ox + 89 * unit, oy + 89 * unit, 2 * unit, 2 * unit);
     }
   }
 
