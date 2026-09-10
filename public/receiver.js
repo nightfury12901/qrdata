@@ -544,25 +544,12 @@ function decodeLoop() {
         }
         decoded = true;
       } else {
-        // Dump calibration cells so we can verify the threshold logic is working.
-        // Expected: 000 100 010 001  (black, red, green, blue)
-        const calib = [];
-        for (let i = 0; i < 4; i++) {
-          const r = getLevel(cellR[i], threshR);
-          const g = getLevel(cellG[i], threshG);
-          const b = getLevel(cellB[i], threshB);
-          calib.push(`${r}${g}${b}`);
-        }
         // Dump min/max per channel to diagnose actual optical contrast
         const contrastStr = `R:${minR.toFixed(0)}-${maxR.toFixed(0)} G:${minG.toFixed(0)}-${maxG.toFixed(0)} B:${minB.toFixed(0)}-${maxB.toFixed(0)}`;
-        
-        // Dump first 4 bytes of R channel
         const hex = Array.from(rBlock.subarray(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-        
-        statStatus.textContent = `RS Fail Ch${frame.failedChannel} | ${contrastStr} | tR=${threshR[0].toFixed(0)} | ${hex}`;
+        statStatus.textContent = `CRC Fail | ${contrastStr} | tR=${threshR[0].toFixed(0)} | ${hex}`;
         statStatus.style.color = '#ff4444';
       }
-
 
       stats.lastAnchors = anchors;
       stats.lastCells = cellPositions;
