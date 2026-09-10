@@ -97,9 +97,9 @@ function loadBlocksToPattern(blocks) {
   
   // Calibration cells (unmasked) for the receiver to measure brightness levels
   patternR[0] = 0; patternG[0] = 0; patternB[0] = 0;
-  patternR[1] = 1; patternG[1] = 1; patternB[1] = 1;
-  patternR[2] = 2; patternG[2] = 2; patternB[2] = 2;
-  patternR[3] = 3; patternG[3] = 3; patternB[3] = 3;
+  patternR[1] = 3; patternG[1] = 0; patternB[1] = 0;
+  patternR[2] = 0; patternG[2] = 3; patternB[2] = 0;
+  patternR[3] = 0; patternG[3] = 0; patternB[3] = 3;
 
   for (let i = 0; i < 5472; i++) {
     const cellIdx = i + 4; // Skip the 4 calibration cells
@@ -109,9 +109,12 @@ function loadBlocksToPattern(blocks) {
     const byteIdx = Math.floor(i / 8);
     const shift = 7 - (i % 8); // extracts 1 bit at a time from MSB to LSB
     
-    patternR[cellIdx] = ((rBlock[byteIdx] >> shift) & 1) * 3;
-    patternG[cellIdx] = ((gBlock[byteIdx] >> shift) & 1) * 3;
-    patternB[cellIdx] = ((bBlock[byteIdx] >> shift) & 1) * 3;
+    // PRBS mask guarantees 50/50 balance preventing threshold collapse
+    const mask = (i * 211 + 17) % 2;
+    
+    patternR[cellIdx] = (((rBlock[byteIdx] >> shift) & 1) ^ mask) * 3;
+    patternG[cellIdx] = (((gBlock[byteIdx] >> shift) & 1) ^ mask) * 3;
+    patternB[cellIdx] = (((bBlock[byteIdx] >> shift) & 1) ^ mask) * 3;
   }
 }
 

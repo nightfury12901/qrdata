@@ -374,9 +374,9 @@ function decodeLoop() {
       const cellB = new Float64Array(numCells);
       const cellPositions = [];
 
-      // The original 0.15 multiplier is perfectly tuned to balance Moiré reduction 
-      // without bleeding into neighboring cells due to lens distortion!
-      const sampleR = Math.max(0, Math.floor(anchors.pixelsPerUnit * 0.15));
+      // The original 0.15 multiplier was too small and caused subpixel aliasing!
+      // Math.max(1, ...) ensures we ALWAYS sample at least a 3x3 box to blur subpixels.
+      const sampleR = Math.max(1, Math.floor(anchors.pixelsPerUnit * 0.35));
 
       for (let i = 0; i < numCells; i++) {
         const [idealX, idealY] = IDEAL_CELLS[i];
@@ -411,12 +411,11 @@ function decodeLoop() {
       
       for (let i = 0; i < 5472; i++) {
         const cellIdx = i + 4;
-        const row = Math.floor(cellIdx / GRID_SIZE);
-        const col = cellIdx % GRID_SIZE;
+        const mask = (i * 211 + 17) % 2;
         
-        bitsR[i] = getLevel(cellR[cellIdx], threshR);
-        bitsG[i] = getLevel(cellG[cellIdx], threshG);
-        bitsB[i] = getLevel(cellB[cellIdx], threshB);
+        bitsR[i] = getLevel(cellR[cellIdx], threshR) ^ mask;
+        bitsG[i] = getLevel(cellG[cellIdx], threshG) ^ mask;
+        bitsB[i] = getLevel(cellB[cellIdx], threshB) ^ mask;
       }
 
       // 11. Pack bits into byte blocks
