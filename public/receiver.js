@@ -388,20 +388,23 @@ function decodeLoop() {
         cellB[i] = rgb.b;
       }
 
-      // Use calibration cells to derive per-channel thresholds.
-      // Calib cells are guaranteed unmasked:
-      //   Cell 0: R=dark, G=dark, B=dark  (all-dark reference)
-      //   Cell 1: R=bright, G=dark, B=dark
-      //   Cell 2: R=dark, G=bright, B=dark
-      //   Cell 3: R=dark, G=dark, B=bright
-      // This is immune to auto-white-balance — we measure the actual camera
-      // response for bright and dark in this very frame, per channel.
-      const darkR = cellR[0], darkG = cellG[0], darkB = cellB[0];
-      const brightR = cellR[1], brightG = cellG[2], brightB = cellB[3];
+      // PRBS mask guarantees exactly 2736 bright and 2736 dark data cells per channel.
+      // So min/max across all data cells gives us the exact camera-captured bright and dark
+      // levels for THIS frame — immune to auto-white-balance.
+      // We skip the 4 calibration cells (indices 0-3) to avoid anchor bleed bias.
+      let minR = 255, maxR = 0, minG = 255, maxG = 0, minB = 255, maxB = 0;
+      for (let i = 4; i < numCells; i++) {
+        if (cellR[i] < minR) minR = cellR[i];
+        if (cellR[i] > maxR) maxR = cellR[i];
+        if (cellG[i] < minG) minG = cellG[i];
+        if (cellG[i] > maxG) maxG = cellG[i];
+        if (cellB[i] < minB) minB = cellB[i];
+        if (cellB[i] > maxB) maxB = cellB[i];
+      }
 
-      const threshR = [(darkR + brightR) / 2];
-      const threshG = [(darkG + brightG) / 2];
-      const threshB = [(darkB + brightB) / 2];
+      const threshR = [(minR + maxR) / 2];
+      const threshG = [(minG + maxG) / 2];
+      const threshB = [(minB + maxB) / 2];
 
       const getLevel = (v, t) => v < t[0] ? 0 : 1;
 
