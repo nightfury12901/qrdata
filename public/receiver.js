@@ -388,21 +388,22 @@ function decodeLoop() {
         cellB[i] = rgb.b;
       }
 
-      // 9. Read calibration cells (first 4 cells)
-      const calR = [0,0,0,0], calG = [0,0,0,0], calB = [0,0,0,0];
-      for (let i = 0; i < 4; i++) {
-        const [idealX, idealY] = IDEAL_CELLS[i];
-        const camPt = projectPoint(H, idealX, idealY);
-        const rgb = sampleAreaRGB(imageData.data, procW, procH, camPt.x, camPt.y, sampleR);
-        calR[i] = rgb.r;
-        calG[i] = rgb.g;
-        calB[i] = rgb.b;
-      }
-      
-      // Calculate 3 thresholds for each channel to separate 0, 1, 2, 3
-      const threshR = [(calR[0]+calR[1])/2, (calR[1]+calR[2])/2, (calR[2]+calR[3])/2];
-      const threshG = [(calG[0]+calG[1])/2, (calG[1]+calG[2])/2, (calG[2]+calG[3])/2];
-      const threshB = [(calB[0]+calB[1])/2, (calB[1]+calB[2])/2, (calB[2]+calB[3])/2];
+      // Calculate 3 thresholds for each channel by looking at the actual distribution of all 5476 cells.
+      // Since the data is PRNG padded and XORed with a spatial mask, the 4 colors (0,1,2,3) 
+      // are uniformly distributed (roughly 25% each) across the entire grid.
+      // Therefore, the ideal boundaries between them are exactly at the 25th, 50th, and 75th percentiles!
+      // This is vastly more robust to screen glare and viewing angles than relying on 4 fixed calibration cells.
+      const sortedR = new Float64Array(cellR).sort();
+      const sortedG = new Float64Array(cellG).sort();
+      const sortedB = new Float64Array(cellB).sort();
+
+      const p25 = Math.floor(numCells * 0.25);
+      const p50 = Math.floor(numCells * 0.50);
+      const p75 = Math.floor(numCells * 0.75);
+
+      const threshR = [sortedR[p25], sortedR[p50], sortedR[p75]];
+      const threshG = [sortedG[p25], sortedG[p50], sortedG[p75]];
+      const threshB = [sortedB[p25], sortedB[p50], sortedB[p75]];
 
       const getLevel = (v, t) => v < t[0] ? 0 : (v < t[1] ? 1 : (v < t[2] ? 2 : 3));
 
@@ -417,13 +418,9 @@ function decodeLoop() {
         const col = cellIdx % GRID_SIZE;
         const mask = ((row + col) % 2) * 3; // 0 or 3
         
-        const [idealX, idealY] = IDEAL_CELLS[cellIdx];
-        const camPt = projectPoint(H, idealX, idealY);
-        const rgb = sampleAreaRGB(imageData.data, procW, procH, camPt.x, camPt.y, sampleR);
-        
-        bitsR[i] = getLevel(rgb.r, threshR) ^ mask;
-        bitsG[i] = getLevel(rgb.g, threshG) ^ mask;
-        bitsB[i] = getLevel(rgb.b, threshB) ^ mask;
+        bitsR[i] = getLevel(cellR[cellIdx], threshR) ^ mask;
+        bitsG[i] = getLevel(cellG[cellIdx], threshG) ^ mask;
+        bitsB[i] = getLevel(cellB[cellIdx], threshB) ^ mask;
       }
 
       // 11. Pack bits into byte blocks
