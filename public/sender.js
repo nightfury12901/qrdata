@@ -106,15 +106,12 @@ function loadBlocksToPattern(blocks) {
     const row = Math.floor(cellIdx / GRID_SIZE);
     const col = cellIdx % GRID_SIZE;
     
-    // Spatial mask to prevent large uniform blocks (0 or 3)
-    const mask = ((row + col) % 2) * 3; 
-    
     const byteIdx = Math.floor(i / 4);
     const shift = 6 - (i % 4) * 2; // extracts 2 bits at a time from MSB to LSB
     
-    patternR[cellIdx] = ((rBlock[byteIdx] >> shift) & 3) ^ mask;
-    patternG[cellIdx] = ((gBlock[byteIdx] >> shift) & 3) ^ mask;
-    patternB[cellIdx] = ((bBlock[byteIdx] >> shift) & 3) ^ mask;
+    patternR[cellIdx] = ((rBlock[byteIdx] >> shift) & 3);
+    patternG[cellIdx] = ((gBlock[byteIdx] >> shift) & 3);
+    patternB[cellIdx] = ((bBlock[byteIdx] >> shift) & 3);
   }
 }
 
@@ -330,11 +327,9 @@ speedSlider.addEventListener('input', () => {
 for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
   const row = Math.floor(i / GRID_SIZE);
   const col = i % GRID_SIZE;
-  const mask = (row + col) % 2;
-  
-  // Random color bits XORed with spatial mask
-  patternR[i] = (Math.random() > 0.5 ? 1 : 0) ^ mask;
-  patternG[i] = (Math.random() > 0.5 ? 1 : 0) ^ mask;
-  patternB[i] = (Math.random() > 0.5 ? 1 : 0) ^ mask;
+  // Random color bits
+  patternR[i] = (Math.random() > 0.5 ? 1 : 0);
+  patternG[i] = (Math.random() > 0.5 ? 1 : 0);
+  patternB[i] = (Math.random() > 0.5 ? 1 : 0);
 }
 render();

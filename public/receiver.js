@@ -427,11 +427,10 @@ function decodeLoop() {
         const cellIdx = i + 4;
         const row = Math.floor(cellIdx / GRID_SIZE);
         const col = cellIdx % GRID_SIZE;
-        const mask = ((row + col) % 2) * 3; // 0 or 3
         
-        bitsR[i] = getLevel(cellR[cellIdx], threshR) ^ mask;
-        bitsG[i] = getLevel(cellG[cellIdx], threshG) ^ mask;
-        bitsB[i] = getLevel(cellB[cellIdx], threshB) ^ mask;
+        bitsR[i] = getLevel(cellR[cellIdx], threshR);
+        bitsG[i] = getLevel(cellG[cellIdx], threshG);
+        bitsB[i] = getLevel(cellB[cellIdx], threshB);
       }
 
       // 11. Pack bits into byte blocks
