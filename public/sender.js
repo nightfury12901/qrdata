@@ -66,12 +66,11 @@ function render() {
     ctx.fillStyle = anchor.color;
     ctx.fillRect(ax, ay, as, as);
     
-    // Draw blue orientation dot OUTSIDE the BR anchor in the margin (at unit 89, 89)
-    // This keeps the anchor purely black so the detector doesn't break.
-    if (anchor.x === 85 && anchor.y === 85) {
-      ctx.fillStyle = '#0000FF';
-      ctx.fillRect(ox + 89 * unit, oy + 89 * unit, 2 * unit, 2 * unit);
-    }
+    // Add a blue dot in the quiet zone diagonally outwards to identify orientation
+    const dx = Math.sign(anchor.x - 46);
+    const dy = Math.sign(anchor.y - 46);
+    ctx.fillStyle = '#0000FF';
+    ctx.fillRect(ox + (anchor.x + dx * 4) * unit, oy + (anchor.y + dy * 4) * unit, 2 * unit, 2 * unit);
   }
 
   // Draw 32x32 RGB data grid

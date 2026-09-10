@@ -293,54 +293,48 @@ function identifyAnchors(candidates, frameW, frameH, rgba) {
     y: (bestQuad[0].cy + bestQuad[1].cy + bestQuad[2].cy + bestQuad[3].cy) / 4
   };
 
+  // Compute pixels-per-unit roughly using the diagonals to accurately find the blue dot
+  const diag1 = Math.hypot(bestQuad[2].cx - bestQuad[0].cx, bestQuad[2].cy - bestQuad[0].cy);
+  const diag2 = Math.hypot(bestQuad[3].cx - bestQuad[1].cx, bestQuad[3].cy - bestQuad[1].cy);
+  const ppu = ((diag1 + diag2) / 2) / 116.0; // Ideal diagonal is 82 * sqrt(2) = 116 units
+
   let maxBlueTint = -Infinity;
-  let brIndex = -1;
+  let trIndex = -1; // The blue dot is drawn on the TR anchor
   for (let i = 0; i < 4; i++) {
     const pt = bestQuad[i];
     
-    // The blue dot is located in the quiet zone margin, outside the anchor.
-    // By stepping outwards from the grid center by ~5% of the anchor's distance,
-    // we land perfectly on the blue dot without it interfering with the black anchor.
+    // Step diagonally outwards from the grid center
     const vx = pt.cx - quadCenter.x;
     const vy = pt.cy - quadCenter.y;
-    const sampleX = pt.cx + vx * 0.05;
-    const sampleY = pt.cy + vy * 0.05;
+    const len = Math.hypot(vx, vy);
+    
+    // Stepping 7.0 units diagonally outwards lands perfectly on the blue dot
+    const sampleX = pt.cx + (vx / len) * (ppu * 7.0);
+    const sampleY = pt.cy + (vy / len) * (ppu * 7.0);
 
-    const rgb = sampleAreaRGB(rgba, frameW, frameH, sampleX, sampleY, 2);
+    // Sample an area proportional to the pixels-per-unit
+    const rgb = sampleAreaRGB(rgba, frameW, frameH, sampleX, sampleY, Math.max(2, ppu));
     // Blue tint: B minus max of (R, G)
     const blueTint = rgb.b - Math.max(rgb.r, rgb.g);
     
     if (blueTint > maxBlueTint) {
       maxBlueTint = blueTint;
-      brIndex = i;
+      trIndex = i;
     }
   }
 
-  const br = bestQuad[brIndex];
-  // TL is diagonally opposite to BR in the sorted array
-  const tl = bestQuad[(brIndex + 2) % 4];
-  
-  // Use cross product to definitively identify TR and BL
-  const p1 = bestQuad[(brIndex + 1) % 4];
-  const p2 = bestQuad[(brIndex + 3) % 4];
-  
-  const dx = br.cx - tl.cx;
-  const dy = br.cy - tl.cy;
-  
-  const cross1 = dx * (p1.cy - tl.cy) - dy * (p1.cx - tl.cx);
-  const cross2 = dx * (p2.cy - tl.cy) - dy * (p2.cx - tl.cx);
+  // TR has the blue dot!
+  const tr = bestQuad[trIndex];
+  // Since bestQuad is sorted clockwise:
+  // Next point after TR is BR, then BL, then TL.
+  const br = bestQuad[(trIndex + 1) % 4];
+  const bl = bestQuad[(trIndex + 2) % 4];
+  const tl = bestQuad[(trIndex + 3) % 4];
 
-  let tr, bl;
-  if (cross1 < cross2) {
-    tr = p1; bl = p2;
-  } else {
-    tr = p2; bl = p1;
-  }
-
-  // Compute pixels-per-unit for cell sampling (distance is 88 units)
+  // Compute precise pixels-per-unit for decoding (distance between anchors is 82 units)
   const distTR = Math.hypot(tr.cx - tl.cx, tr.cy - tl.cy);
   const distBL = Math.hypot(bl.cx - tl.cx, bl.cy - tl.cy);
-  const pixelsPerUnit = (distTR + distBL) / 176;
+  const pixelsPerUnit = (distTR + distBL) / 164.0;
 
   return {
     TL: [tl.cx, tl.cy],
