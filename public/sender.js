@@ -47,7 +47,9 @@ function render() {
   const topReserved = 180;
   const availHeight = canvas.height - topReserved;
 
-  const patternPx = Math.min(canvas.width, availHeight) * 0.85;
+  // Reduced from 0.85 to 0.70 to create a massive white moat around the grid.
+  // This guarantees that camera blur cannot cause the black anchors to merge with the dark UI background.
+  const patternPx = Math.min(canvas.width, availHeight) * 0.70;
   const unit = patternPx / TOTAL_UNITS;
 
   const ox = (canvas.width - patternPx) / 2;
