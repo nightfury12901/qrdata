@@ -388,22 +388,33 @@ function decodeLoop() {
         cellB[i] = rgb.b;
       }
 
-      // Calculate 3 thresholds for each channel by looking at the actual distribution of all 5476 cells.
-      // Since the data is PRNG padded and XORed with a spatial mask, the 4 colors (0,1,2,3) 
-      // are uniformly distributed (roughly 25% each) across the entire grid.
-      // Therefore, the ideal boundaries between them are exactly at the 25th, 50th, and 75th percentiles!
-      // This is vastly more robust to screen glare and viewing angles than relying on 4 fixed calibration cells.
+      // Calculate 3 thresholds for each channel by finding the midpoints between the 4 color clusters.
+      // The 4 color clusters (0, 1, 2, 3) are centered at roughly the 12.5%, 37.5%, 62.5%, and 87.5% percentiles.
+      // We set the thresholds exactly at the midpoints between these clusters!
       const sortedR = new Float64Array(cellR).sort();
       const sortedG = new Float64Array(cellG).sort();
       const sortedB = new Float64Array(cellB).sort();
 
-      const p25 = Math.floor(numCells * 0.25);
-      const p50 = Math.floor(numCells * 0.50);
-      const p75 = Math.floor(numCells * 0.75);
+      const p12 = Math.floor(numCells * 0.125);
+      const p37 = Math.floor(numCells * 0.375);
+      const p62 = Math.floor(numCells * 0.625);
+      const p87 = Math.floor(numCells * 0.875);
 
-      const threshR = [sortedR[p25], sortedR[p50], sortedR[p75]];
-      const threshG = [sortedG[p25], sortedG[p50], sortedG[p75]];
-      const threshB = [sortedB[p25], sortedB[p50], sortedB[p75]];
+      const threshR = [
+        (sortedR[p12] + sortedR[p37]) / 2,
+        (sortedR[p37] + sortedR[p62]) / 2,
+        (sortedR[p62] + sortedR[p87]) / 2
+      ];
+      const threshG = [
+        (sortedG[p12] + sortedG[p37]) / 2,
+        (sortedG[p37] + sortedG[p62]) / 2,
+        (sortedG[p62] + sortedG[p87]) / 2
+      ];
+      const threshB = [
+        (sortedB[p12] + sortedB[p37]) / 2,
+        (sortedB[p37] + sortedB[p62]) / 2,
+        (sortedB[p62] + sortedB[p87]) / 2
+      ];
 
       const getLevel = (v, t) => v < t[0] ? 0 : (v < t[1] ? 1 : (v < t[2] ? 2 : 3));
 

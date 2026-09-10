@@ -308,9 +308,9 @@ function identifyAnchors(candidates, frameW, frameH, rgba) {
     const vy = pt.cy - quadCenter.y;
     const len = Math.hypot(vx, vy);
     
-    // Stepping 7.0 units diagonally outwards lands perfectly on the blue dot
-    const sampleX = pt.cx + (vx / len) * (ppu * 7.0);
-    const sampleY = pt.cy + (vy / len) * (ppu * 7.0);
+    // Stepping exactly 7.07 units (sqrt(50)) diagonally outwards hits the center of the blue dot
+    const sampleX = pt.cx + (vx / len) * (ppu * 7.07);
+    const sampleY = pt.cy + (vy / len) * (ppu * 7.07);
 
     // Sample an area proportional to the pixels-per-unit
     const rgb = sampleAreaRGB(rgba, frameW, frameH, sampleX, sampleY, Math.max(2, ppu));

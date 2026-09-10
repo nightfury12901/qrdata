@@ -67,11 +67,12 @@ function render() {
     ctx.fillRect(ax, ay, as, as);
     
     // Only draw the blue orientation dot for the Top-Right anchor (TR)
+    // The TR anchor is at x=85, y=3 (top-left of its 4x4 box). Its center is at 87, 5.
+    // We draw the 2x2 blue dot exactly at the diagonal outward position (+5, -5) from the center.
+    // Center of blue dot = 92, 0. Top-left of blue dot = 91, -1.
     if (anchor.x === 85 && anchor.y === 3) {
-      const dx = Math.sign(anchor.x - 46);
-      const dy = Math.sign(anchor.y - 46);
       ctx.fillStyle = '#0000FF';
-      ctx.fillRect(ox + (anchor.x + dx * 4) * unit, oy + (anchor.y + dy * 4) * unit, 2 * unit, 2 * unit);
+      ctx.fillRect(ox + 91 * unit, oy - 1 * unit, 2 * unit, 2 * unit);
     }
   }
 
