@@ -553,15 +553,16 @@ function decodeLoop() {
           const b = getLevel(cellB[i], threshB);
           calib.push(`${r}${g}${b}`);
         }
-        // Also dump threshold values for debugging
-        const threshStr = `tR=${threshR[0].toFixed(0)} tG=${threshG[0].toFixed(0)} tB=${threshB[0].toFixed(0)}`;
+        // Dump min/max per channel to diagnose actual optical contrast
+        const contrastStr = `R:${minR.toFixed(0)}-${maxR.toFixed(0)} G:${minG.toFixed(0)}-${maxG.toFixed(0)} B:${minB.toFixed(0)}-${maxB.toFixed(0)}`;
         
-        // Dump first 8 bytes of R channel to check if headers are intact!
-        const hex = Array.from(rBlock.subarray(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+        // Dump first 4 bytes of R channel
+        const hex = Array.from(rBlock.subarray(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(' ');
         
-        statStatus.textContent = `RS Fail Ch${frame.failedChannel} | Calib: ${calib.join(' ')} | ${threshStr} | ${hex}`;
+        statStatus.textContent = `RS Fail Ch${frame.failedChannel} | ${contrastStr} | tR=${threshR[0].toFixed(0)} | ${hex}`;
         statStatus.style.color = '#ff4444';
       }
+
 
       stats.lastAnchors = anchors;
       stats.lastCells = cellPositions;
