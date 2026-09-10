@@ -374,9 +374,9 @@ function decodeLoop() {
       const cellB = new Float64Array(numCells);
       const cellPositions = [];
 
-      // Adaptive sample radius: sample a larger area to average out screen moire patterns,
-      // but ensure we don't bleed into neighboring cells.
-      const sampleR = Math.floor(anchors.pixelsPerUnit * 0.25);
+      // The original 0.15 multiplier is perfectly tuned to balance Moiré reduction 
+      // without bleeding into neighboring cells due to lens distortion!
+      const sampleR = Math.max(0, Math.floor(anchors.pixelsPerUnit * 0.15));
 
       for (let i = 0; i < numCells; i++) {
         const [idealX, idealY] = IDEAL_CELLS[i];
@@ -555,6 +555,18 @@ function decodeLoop() {
           }
         }
         decoded = true;
+      } else {
+        // Debug: Log the first 4 calibration cells to verify if thresholds are working.
+        // They should always decode perfectly to 000, 111, 222, 333.
+        const calib = [];
+        for (let i = 0; i < 4; i++) {
+          const r = getLevel(cellR[i], threshR);
+          const g = getLevel(cellG[i], threshG);
+          const b = getLevel(cellB[i], threshB);
+          calib.push(`${r}${g}${b}`);
+        }
+        statStatus.textContent = `RS Failed | Calib: ${calib.join(' ')}`;
+        statStatus.style.color = '#ff4444';
       }
 
       stats.lastAnchors = anchors;
