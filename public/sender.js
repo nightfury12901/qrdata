@@ -328,6 +328,32 @@ speedSlider.addEventListener('input', () => {
   speedLabel.textContent = `${speedSlider.value}ms`;
 });
 
+// ---- RS Loopback Test ----
+function runLoopbackTest() {
+  const status = document.getElementById('txStatus');
+  try {
+    const payload = new TextEncoder().encode("PHOTON_TEST_OK");
+    const blocks = encodeFrame(42, false, FLAG_TEXT, payload);
+    const [rB, gB, bB] = blocks;
+    
+    const senderHex = Array.from(rB.subarray(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    
+    const frame = decodeFrame(rB, gB, bB);
+    if (frame.valid) {
+      const decoded = new TextDecoder().decode(frame.payload);
+      status.textContent = `RS OK! "${decoded.substring(0, 20)}" err=${frame.errorsCorrected} rB=${senderHex}`;
+      status.style.color = '#0f0';
+    } else {
+      status.textContent = `RS LOOPBACK FAILED! ch=${frame.failedChannel} rB=${senderHex}`;
+      status.style.color = '#f00';
+    }
+  } catch (e) {
+    status.textContent = `RS EXCEPTION: ${e.message}`;
+    status.style.color = '#f00';
+  }
+}
+document.getElementById('btnLoopback').addEventListener('click', runLoopbackTest);
+
 // Default pattern: Random static to prevent structured blobs
 for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
   const row = Math.floor(i / GRID_SIZE);
@@ -338,3 +364,4 @@ for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
   patternB[i] = (Math.random() > 0.5 ? 3 : 0);
 }
 render();
+
