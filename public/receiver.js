@@ -564,7 +564,11 @@ function decodeLoop() {
           const b = getLevel(cellB[i], threshB);
           calib.push(`${r}${g}${b}`);
         }
-        statStatus.textContent = `RS Failed | Calib: ${calib.join(' ')}`;
+        
+        // Dump first 8 bytes of R channel to check if headers are intact!
+        const hex = Array.from(rBlock.subarray(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+        
+        statStatus.textContent = `RS Fail Ch${frame.failedChannel} | Calib: ${calib.join(' ')} | ${hex}`;
         statStatus.style.color = '#ff4444';
       }
 
