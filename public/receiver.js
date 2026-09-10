@@ -395,28 +395,14 @@ function decodeLoop() {
       const sortedG = new Float64Array(cellG).sort();
       const sortedB = new Float64Array(cellB).sort();
 
-      const p12 = Math.floor(numCells * 0.125);
-      const p37 = Math.floor(numCells * 0.375);
-      const p62 = Math.floor(numCells * 0.625);
-      const p87 = Math.floor(numCells * 0.875);
+      const p25 = Math.floor(numCells * 0.25);
+      const p75 = Math.floor(numCells * 0.75);
 
-      const threshR = [
-        (sortedR[p12] + sortedR[p37]) / 2,
-        (sortedR[p37] + sortedR[p62]) / 2,
-        (sortedR[p62] + sortedR[p87]) / 2
-      ];
-      const threshG = [
-        (sortedG[p12] + sortedG[p37]) / 2,
-        (sortedG[p37] + sortedG[p62]) / 2,
-        (sortedG[p62] + sortedG[p87]) / 2
-      ];
-      const threshB = [
-        (sortedB[p12] + sortedB[p37]) / 2,
-        (sortedB[p37] + sortedB[p62]) / 2,
-        (sortedB[p62] + sortedB[p87]) / 2
-      ];
+      const threshR = [(sortedR[p25] + sortedR[p75]) / 2];
+      const threshG = [(sortedG[p25] + sortedG[p75]) / 2];
+      const threshB = [(sortedB[p25] + sortedB[p75]) / 2];
 
-      const getLevel = (v, t) => v < t[0] ? 0 : (v < t[1] ? 1 : (v < t[2] ? 2 : 3));
+      const getLevel = (v, t) => v < t[0] ? 0 : 1;
 
       // 10. Extract data bits (skip 4 calibration cells)
       const bitsR = new Uint8Array(5472);
@@ -434,17 +420,17 @@ function decodeLoop() {
       }
 
       // 11. Pack bits into byte blocks
-      const rBlock = new Uint8Array(1368);
-      const gBlock = new Uint8Array(1368);
-      const bBlock = new Uint8Array(1368);
+      const rBlock = new Uint8Array(684);
+      const gBlock = new Uint8Array(684);
+      const bBlock = new Uint8Array(684);
       
-      for (let i = 0; i < 1368; i++) {
+      for (let i = 0; i < 684; i++) {
         let byteR = 0, byteG = 0, byteB = 0;
-        for (let j = 0; j < 4; j++) {
-          const idx = i * 4 + j;
-          byteR = (byteR << 2) | bitsR[idx];
-          byteG = (byteG << 2) | bitsG[idx];
-          byteB = (byteB << 2) | bitsB[idx];
+        for (let j = 0; j < 8; j++) {
+          const idx = i * 8 + j;
+          byteR = (byteR << 1) | bitsR[idx];
+          byteG = (byteG << 1) | bitsG[idx];
+          byteB = (byteB << 1) | bitsB[idx];
         }
         rBlock[i] = byteR;
         gBlock[i] = byteG;
@@ -556,7 +542,7 @@ function decodeLoop() {
         decoded = true;
       } else {
         // Debug: Log the first 4 calibration cells to verify if thresholds are working.
-        // They should always decode perfectly to 000, 111, 222, 333.
+        // They should always decode perfectly to 000, 111, 111, 111.
         const calib = [];
         for (let i = 0; i < 4; i++) {
           const r = getLevel(cellR[i], threshR);

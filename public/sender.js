@@ -100,18 +100,120 @@ function loadBlocksToPattern(blocks) {
   patternR[1] = 1; patternG[1] = 1; patternB[1] = 1;
   patternR[2] = 2; patternG[2] = 2; patternB[2] = 2;
   patternR[3] = 3; patternG[3] = 3; patternB[3] = 3;
+/**
+ * sender.js — Renders a 32×32 RGB data grid with 4 corner anchor
+ * markers on a canvas element. Each cell encodes 3 bits (R, G, B).
+ *
+ * The anchors remain black/white for reliable detection.
+ * Data cells use 8 distinct RGB colors (one per 3-bit combination).
+ */
+
+// ---- Layout constants (unit coordinates) ----
+const GRID_SIZE = 74;
+const TOTAL_UNITS = 92;
+const GRID_ORIGIN = { x: 9, y: 9 };
+
+const ANCHORS = [
+  { x: 3, y: 3,  color: '#000000' }, // TL
+  { x: 85, y: 3, color: '#000000' }, // TR
+  { x: 3, y: 85, color: '#000000' }, // BL
+  { x: 85, y: 85, color: '#000000' }, // BR — Blue orientation dot added below
+];
+const ANCHOR_SIZE = 4; // units
+
+// ---- State ----
+// 3 pattern arrays: one per color channel (0 = off, 1 = on)
+const patternR = new Uint8Array(GRID_SIZE * GRID_SIZE);
+const patternG = new Uint8Array(GRID_SIZE * GRID_SIZE);
+const patternB = new Uint8Array(GRID_SIZE * GRID_SIZE);
+
+let txInterval = null;
+let sourceChunks = [];
+let metadataFrameBlocks = null;
+let fountainSeq = 0;
+
+// Audio NACK/ACK state
+let audioCtx = null;
+let analyser = null;
+let isNackActive = false;
+let audioListenLoopId = null;
+
+// ---- Canvas rendering ----
+const canvas = document.getElementById('gridCanvas');
+const ctx = canvas.getContext('2d');
+
+function render() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const topReserved = 180;
+  const availHeight = canvas.height - topReserved;
+
+  const patternPx = Math.min(canvas.width, availHeight) * 0.85;
+  const unit = patternPx / TOTAL_UNITS;
+
+  const ox = (canvas.width - patternPx) / 2;
+  const oy = topReserved + (availHeight - patternPx) / 2;
+
+  // White background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw anchors
+  for (const anchor of ANCHORS) {
+    const ax = ox + anchor.x * unit;
+    const ay = oy + anchor.y * unit;
+    const as = ANCHOR_SIZE * unit;
+
+    ctx.fillStyle = anchor.color;
+    ctx.fillRect(ax, ay, as, as);
+    
+    // Draw blue orientation dot OUTSIDE the BR anchor in the margin (at unit 89, 89)
+    // This keeps the anchor purely black so the detector doesn't break.
+    if (anchor.x === 85 && anchor.y === 85) {
+      ctx.fillStyle = '#0000FF';
+      ctx.fillRect(ox + 89 * unit, oy + 89 * unit, 2 * unit, 2 * unit);
+    }
+  }
+
+  // Draw 32x32 RGB data grid
+  for (let row = 0; row < GRID_SIZE; row++) {
+    for (let col = 0; col < GRID_SIZE; col++) {
+      const idx = row * GRID_SIZE + col;
+      // Map 0, 1, 2, 3 to 85, 141, 197, 253 to guarantee they are strictly lighter than the black anchors
+      const r = 85 + patternR[idx] * 56;
+      const g = 85 + patternG[idx] * 56;
+      const b = 85 + patternB[idx] * 56;
+
+      const cx = ox + (GRID_ORIGIN.x + col) * unit;
+      const cy = oy + (GRID_ORIGIN.y + row) * unit;
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(cx, cy, Math.ceil(unit), Math.ceil(unit));
+    }
+  }
+}
+
+// Load 3 RS-encoded blocks into the RGB pattern arrays
+function loadBlocksToPattern(blocks) {
+  const [rBlock, gBlock, bBlock] = blocks; // each block is 1368 bytes
+  
+  // Calibration cells (unmasked) for the receiver to measure brightness levels
+  patternR[0] = 0; patternG[0] = 0; patternB[0] = 0;
+  patternR[1] = 1; patternG[1] = 1; patternB[1] = 1;
+  patternR[2] = 2; patternG[2] = 2; patternB[2] = 2;
+  patternR[3] = 3; patternG[3] = 3; patternB[3] = 3;
 
   for (let i = 0; i < 5472; i++) {
     const cellIdx = i + 4; // Skip the 4 calibration cells
     const row = Math.floor(cellIdx / GRID_SIZE);
     const col = cellIdx % GRID_SIZE;
     
-    const byteIdx = Math.floor(i / 4);
-    const shift = 6 - (i % 4) * 2; // extracts 2 bits at a time from MSB to LSB
+    const byteIdx = Math.floor(i / 8);
+    const shift = 7 - (i % 8); // extracts 1 bit at a time from MSB to LSB
     
-    patternR[cellIdx] = ((rBlock[byteIdx] >> shift) & 3);
-    patternG[cellIdx] = ((gBlock[byteIdx] >> shift) & 3);
-    patternB[cellIdx] = ((bBlock[byteIdx] >> shift) & 3);
+    patternR[cellIdx] = ((rBlock[byteIdx] >> shift) & 1) * 3;
+    patternG[cellIdx] = ((gBlock[byteIdx] >> shift) & 1) * 3;
+    patternB[cellIdx] = ((bBlock[byteIdx] >> shift) & 1) * 3;
   }
 }
 
@@ -327,9 +429,9 @@ speedSlider.addEventListener('input', () => {
 for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
   const row = Math.floor(i / GRID_SIZE);
   const col = i % GRID_SIZE;
-  // Random color bits
-  patternR[i] = (Math.random() > 0.5 ? 1 : 0);
-  patternG[i] = (Math.random() > 0.5 ? 1 : 0);
-  patternB[i] = (Math.random() > 0.5 ? 1 : 0);
+  // Random color bits (0 or 3) for maximum contrast
+  patternR[i] = (Math.random() > 0.5 ? 3 : 0);
+  patternG[i] = (Math.random() > 0.5 ? 3 : 0);
+  patternB[i] = (Math.random() > 0.5 ? 3 : 0);
 }
 render();
