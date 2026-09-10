@@ -388,19 +388,20 @@ function decodeLoop() {
         cellB[i] = rgb.b;
       }
 
-      // Calculate 3 thresholds for each channel by finding the midpoints between the 4 color clusters.
-      // The 4 color clusters (0, 1, 2, 3) are centered at roughly the 12.5%, 37.5%, 62.5%, and 87.5% percentiles.
-      // We set the thresholds exactly at the midpoints between these clusters!
-      const sortedR = new Float64Array(cellR).sort();
-      const sortedG = new Float64Array(cellG).sort();
-      const sortedB = new Float64Array(cellB).sort();
+      // Use calibration cells to derive per-channel thresholds.
+      // Calib cells are guaranteed unmasked:
+      //   Cell 0: R=dark, G=dark, B=dark  (all-dark reference)
+      //   Cell 1: R=bright, G=dark, B=dark
+      //   Cell 2: R=dark, G=bright, B=dark
+      //   Cell 3: R=dark, G=dark, B=bright
+      // This is immune to auto-white-balance — we measure the actual camera
+      // response for bright and dark in this very frame, per channel.
+      const darkR = cellR[0], darkG = cellG[0], darkB = cellB[0];
+      const brightR = cellR[1], brightG = cellG[2], brightB = cellB[3];
 
-      const p25 = Math.floor(numCells * 0.25);
-      const p75 = Math.floor(numCells * 0.75);
-
-      const threshR = [(sortedR[p25] + sortedR[p75]) / 2];
-      const threshG = [(sortedG[p25] + sortedG[p75]) / 2];
-      const threshB = [(sortedB[p25] + sortedB[p75]) / 2];
+      const threshR = [(darkR + brightR) / 2];
+      const threshG = [(darkG + brightG) / 2];
+      const threshB = [(darkB + brightB) / 2];
 
       const getLevel = (v, t) => v < t[0] ? 0 : 1;
 
@@ -540,8 +541,8 @@ function decodeLoop() {
         }
         decoded = true;
       } else {
-        // Debug: Log the first 4 calibration cells to verify if thresholds are working.
-        // They should always decode perfectly to 000, 111, 111, 111.
+        // Dump calibration cells so we can verify the threshold logic is working.
+        // Expected: 000 100 010 001  (black, red, green, blue)
         const calib = [];
         for (let i = 0; i < 4; i++) {
           const r = getLevel(cellR[i], threshR);
@@ -549,11 +550,13 @@ function decodeLoop() {
           const b = getLevel(cellB[i], threshB);
           calib.push(`${r}${g}${b}`);
         }
+        // Also dump threshold values for debugging
+        const threshStr = `tR=${threshR[0].toFixed(0)} tG=${threshG[0].toFixed(0)} tB=${threshB[0].toFixed(0)}`;
         
         // Dump first 8 bytes of R channel to check if headers are intact!
         const hex = Array.from(rBlock.subarray(0, 8)).map(b => b.toString(16).padStart(2, '0')).join(' ');
         
-        statStatus.textContent = `RS Fail Ch${frame.failedChannel} | Calib: ${calib.join(' ')} | ${hex}`;
+        statStatus.textContent = `RS Fail Ch${frame.failedChannel} | Calib: ${calib.join(' ')} | ${threshStr} | ${hex}`;
         statStatus.style.color = '#ff4444';
       }
 
