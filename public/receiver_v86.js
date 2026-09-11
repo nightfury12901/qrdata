@@ -614,7 +614,7 @@ function decodeLoop() {
     statStatus.textContent = 'Decoding frames ✓';
     statStatus.className = 'value';
   } else {
-    if (!statStatus.textContent.includes('RS Fail')) {
+    if (!statStatus.textContent.includes('Fail')) {
       statStatus.textContent = anchors ? 'CRC failed' : 'Searching for grid…';
       statStatus.className = anchors ? 'value warn' : 'value';
     }
