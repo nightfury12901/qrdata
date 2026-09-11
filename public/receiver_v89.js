@@ -247,16 +247,11 @@ async function initCamera() {
   statStatus.textContent = 'Requesting camera…';
 
   try {
-    // Try to lock landscape (may fail without fullscreen, that's OK)
-    if (screen.orientation && screen.orientation.lock) {
-      screen.orientation.lock('landscape').catch(() => {});
-    }
-
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
       },
       audio: false,
     });
