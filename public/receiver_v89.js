@@ -369,9 +369,9 @@ function decodeLoop() {
       const cellB = new Float64Array(numCells);
       const cellPositions = [];
 
-      // The original 0.15 multiplier was too small and caused subpixel aliasing!
-      // Math.max(1, ...) ensures we ALWAYS sample at least a 3x3 box to blur subpixels.
-      const sampleR = Math.max(1, Math.floor(anchors.pixelsPerUnit * 0.35));
+      // 8. Dynamic sample radius based on grid scale
+      const pixelsPerCell = Math.hypot(anchors.TR[0] - anchors.TL[0], anchors.TR[1] - anchors.TL[1]) / (IDEAL_ANCHORS.TR[0] - IDEAL_ANCHORS.TL[0]);
+      const sampleR = Math.max(0, Math.floor(pixelsPerCell * 0.15));
 
       for (let i = 0; i < numCells; i++) {
         const [idealX, idealY] = IDEAL_CELLS[i];
