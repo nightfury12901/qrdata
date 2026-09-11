@@ -20,7 +20,7 @@ const IDEAL_ANCHORS = {
   TL: [5, 5],
   TR: [87, 5],
   BL: [5, 87],
-  BR: [87, 87],
+  BR: [87, 87]
 };
 
 // Ideal cell centers

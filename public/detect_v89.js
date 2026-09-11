@@ -298,13 +298,14 @@ function identifyAnchors(candidates, frameW, frameH, rgba) {
   for (let i = 0; i < 4; i++) {
     const pt = bestQuad[i];
     
-    // The blue dot is located in the quiet zone margin, outside the anchor.
-    // By stepping outwards from the grid center by ~5% of the anchor's distance,
-    // we land perfectly on the blue dot without it interfering with the black anchor.
+    // Blue dot sampling fraction:
+    // Anchor center = 85 + 4/2 = 87. Grid center = 92/2 = 46. Blue dot center = 89 + 2/2 = 90.
+    // sampleFrac = (90 - 87) / (87 - 46) = 3 / 41 ≈ 0.0732
+    const sampleFrac = 3 / 41;
     const vx = pt.cx - quadCenter.x;
     const vy = pt.cy - quadCenter.y;
-    const sampleX = pt.cx + vx * 0.05;
-    const sampleY = pt.cy + vy * 0.05;
+    const sampleX = pt.cx + vx * sampleFrac;
+    const sampleY = pt.cy + vy * sampleFrac;
 
     const rgb = sampleAreaRGB(rgba, frameW, frameH, sampleX, sampleY, 2);
     // Blue tint: B minus max of (R, G)
@@ -314,6 +315,12 @@ function identifyAnchors(candidates, frameW, frameH, rgba) {
       maxBlueTint = blueTint;
       brIndex = i;
     }
+  }
+
+  // Fallback: If no strong blue dot is detected, assume the phone is held upright
+  // and use the bottom-most right-most anchor based on geometric sorting.
+  if (maxBlueTint < 20) {
+    brIndex = 3;
   }
 
   const br = bestQuad[brIndex];
