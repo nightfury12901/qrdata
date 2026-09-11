@@ -413,11 +413,9 @@ function decodeLoop() {
       const bitsG = new Uint8Array(5472);
       const bitsB = new Uint8Array(5472);
       
-      const prng = mulberry32(0x12345678);
-      
       for (let i = 0; i < 5472; i++) {
         const cellIdx = i + 4;
-        const mask = prng() > 0.5 ? 1 : 0;
+        const mask = getMaskBit(i);
         
         bitsR[i] = getLevel(cellR[cellIdx], threshR) ^ mask;
         bitsG[i] = getLevel(cellG[cellIdx], threshG) ^ mask;

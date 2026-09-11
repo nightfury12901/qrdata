@@ -41,7 +41,7 @@ const FLAG_FILE_META = 1;
 const FLAG_FILE_DATA = 2;
 const FLAG_FOUNTAIN_DATA = 3;
 
-// Mulberry32 PRNG
+// Mulberry32 PRNG (used only for fountain sequence generation)
 function mulberry32(a) {
   return function() {
     var t = a += 0x6D2B79F5;
@@ -49,6 +49,15 @@ function mulberry32(a) {
     t ^= t + Math.imul(t ^ t >>> 7, t | 61);
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   }
+}
+
+// Stateless integer hash function to generate deterministic PRBS mask for bit index `i`.
+// This guarantees sender/receiver remain perfectly synchronized regardless of framerate.
+function getMaskBit(i) {
+  let h = (i + 0x12345678) | 0;
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 31) & 1;
 }
 
 /**
