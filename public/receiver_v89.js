@@ -247,11 +247,12 @@ async function initCamera() {
   statStatus.textContent = 'Requesting camera…';
 
   try {
+    const isPortrait = window.innerHeight > window.innerWidth;
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: 4096 },
-        height: { ideal: 4096 },
+        width: { ideal: isPortrait ? 1080 : 1920 },
+        height: { ideal: isPortrait ? 1920 : 1080 },
       },
       audio: false,
     });
@@ -383,38 +384,27 @@ function decodeLoop() {
         cellB[i] = rgb.b;
       }
 
-      // 10. Local Spatial Thresholding
-      // A global min/max threshold completely fails when the phone casts a physical shadow 
-      // over the screen (which happens frequently at high pixel densities).
-      // Since the data is PRBS masked, every 9x9 block contains ~50% black and ~50% white cells.
-      // So a local spatial average yields the perfect shadow-tracking threshold for each cell.
-      function getLocalThresholds(cellVals) {
-        const thresh = new Float64Array(numCells);
-        const radius = 4; // 9x9 box = 81 cells
-        for (let r = 0; r < GRID_SIZE; r++) {
-          for (let c = 0; c < GRID_SIZE; c++) {
-            let sum = 0, count = 0;
-            const sr = Math.max(0, r - radius);
-            const er = Math.min(GRID_SIZE - 1, r + radius);
-            const sc = Math.max(0, c - radius);
-            const ec = Math.min(GRID_SIZE - 1, c + radius);
-            for (let nr = sr; nr <= er; nr++) {
-              for (let nc = sc; nc <= ec; nc++) {
-                sum += cellVals[nr * GRID_SIZE + nc];
-                count++;
-              }
-            }
-            thresh[r * GRID_SIZE + c] = sum / count;
-          }
-        }
-        return thresh;
+      // PRBS mask guarantees exactly 2736 bright and 2736 dark data cells per channel.
+      // So min/max across all data cells gives us the exact camera-captured bright and dark
+      // levels for THIS frame — immune to auto-white-balance.
+      // We skip the 4 calibration cells (indices 0-3) to avoid anchor bleed bias.
+      let minR = 255, maxR = 0, minG = 255, maxG = 0, minB = 255, maxB = 0;
+      for (let i = 4; i < numCells; i++) {
+        if (cellR[i] < minR) minR = cellR[i];
+        if (cellR[i] > maxR) maxR = cellR[i];
+        if (cellG[i] < minG) minG = cellG[i];
+        if (cellG[i] > maxG) maxG = cellG[i];
+        if (cellB[i] < minB) minB = cellB[i];
+        if (cellB[i] > maxB) maxB = cellB[i];
       }
 
-      const threshR = getLocalThresholds(cellR);
-      const threshG = getLocalThresholds(cellG);
-      const threshB = getLocalThresholds(cellB);
+      const threshR = [(minR + maxR) / 2];
+      const threshG = [(minG + maxG) / 2];
+      const threshB = [(minB + maxB) / 2];
 
-      // Extract data bits (skip 4 calibration cells)
+      const getLevel = (v, t) => v < t[0] ? 0 : 1;
+
+      // 10. Extract data bits (skip 4 calibration cells)
       const bitsR = new Uint8Array(5472);
       const bitsG = new Uint8Array(5472);
       const bitsB = new Uint8Array(5472);
@@ -423,9 +413,9 @@ function decodeLoop() {
         const cellIdx = i + 4;
         const mask = getMaskBit(i);
         
-        bitsR[i] = (cellR[cellIdx] < threshR[cellIdx] ? 0 : 1) ^ mask;
-        bitsG[i] = (cellG[cellIdx] < threshG[cellIdx] ? 0 : 1) ^ mask;
-        bitsB[i] = (cellB[cellIdx] < threshB[cellIdx] ? 0 : 1) ^ mask;
+        bitsR[i] = getLevel(cellR[cellIdx], threshR) ^ mask;
+        bitsG[i] = getLevel(cellG[cellIdx], threshG) ^ mask;
+        bitsB[i] = getLevel(cellB[cellIdx], threshB) ^ mask;
       }
 
       // 11. Pack bits into byte blocks
