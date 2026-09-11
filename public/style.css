@@ -42,6 +42,8 @@ body {
 
 .sender-controls {
   width: 260px;
+  min-width: 260px;
+  flex-shrink: 0;
   height: 100vh;
   display: flex;
   flex-direction: column;

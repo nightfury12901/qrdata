@@ -41,18 +41,16 @@ const canvas = document.getElementById('gridCanvas');
 const ctx = canvas.getContext('2d');
 
 function render() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+  const container = document.getElementById('canvasContainer');
+  canvas.width = container.clientWidth;
+  canvas.height = container.clientHeight;
 
-  const topReserved = 180;
-  const availHeight = canvas.height - topReserved;
-
-  // Increased to 0.95 to maximize QR code size on screen
-  const patternPx = Math.min(canvas.width, availHeight) * 0.95;
+  // Maximize QR code size on screen (98% of smallest dimension)
+  const patternPx = Math.min(canvas.width, canvas.height) * 0.98;
   const unit = patternPx / TOTAL_UNITS;
 
   const ox = (canvas.width - patternPx) / 2;
-  const oy = topReserved + (availHeight - patternPx) / 2;
+  const oy = (canvas.height - patternPx) / 2;
 
   // White background
   ctx.fillStyle = '#ffffff';
@@ -327,7 +325,10 @@ function stopTransmission() {
 document.getElementById('btnPrepare').addEventListener('click', prepareSession);
 document.getElementById('btnStart').addEventListener('click', startBroadcast);
 document.getElementById('btnStop').addEventListener('click', stopTransmission);
-window.addEventListener('resize', render);
+window.addEventListener('resize', () => {
+  // Allow flex layout to calculate before grabbing clientWidth
+  setTimeout(render, 50);
+});
 
 const speedSlider = document.getElementById('speedSlider');
 const speedLabel = document.getElementById('speedLabel');
