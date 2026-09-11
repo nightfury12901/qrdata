@@ -47,9 +47,8 @@ function render() {
   const topReserved = 180;
   const availHeight = canvas.height - topReserved;
 
-  // Reduced from 0.85 to 0.70 to create a massive white moat around the grid.
-  // This guarantees that camera blur cannot cause the black anchors to merge with the dark UI background.
-  const patternPx = Math.min(canvas.width, availHeight) * 0.70;
+  // Increased to 0.95 to maximize QR code size on screen
+  const patternPx = Math.min(canvas.width, availHeight) * 0.95;
   const unit = patternPx / TOTAL_UNITS;
 
   const ox = (canvas.width - patternPx) / 2;
@@ -59,12 +58,17 @@ function render() {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Draw anchors
+  // Draw anchors with a 1-unit white quiet zone to prevent merging with black data cells
   for (const anchor of ANCHORS) {
     const ax = ox + anchor.x * unit;
     const ay = oy + anchor.y * unit;
     const as = ANCHOR_SIZE * unit;
 
+    // Draw white quiet zone (1 unit larger on all sides)
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(ax - unit, ay - unit, as + 2 * unit, as + 2 * unit);
+
+    // Draw black anchor
     ctx.fillStyle = anchor.color;
     ctx.fillRect(ax, ay, as, as);
     
@@ -80,10 +84,10 @@ function render() {
   for (let row = 0; row < GRID_SIZE; row++) {
     for (let col = 0; col < GRID_SIZE; col++) {
       const idx = row * GRID_SIZE + col;
-      // Map 0, 1, 2, 3 to 85, 141, 197, 253 to guarantee they are strictly lighter than the black anchors
-      const r = 85 + patternR[idx] * 56;
-      const g = 85 + patternG[idx] * 56;
-      const b = 85 + patternB[idx] * 56;
+      // patternR/G/B contains 0 or 3. Multiply by 85 yields 0 (black) or 255 (white).
+      const r = patternR[idx] * 85;
+      const g = patternG[idx] * 85;
+      const b = patternB[idx] * 85;
 
       const cx = ox + (GRID_ORIGIN.x + col) * unit;
       const cy = oy + (GRID_ORIGIN.y + row) * unit;
@@ -220,8 +224,11 @@ async function prepareSession() {
   // Chunk the data
   let offset = 0;
   while (offset < payloadBytes.length || offset === 0) {
-    // Pad chunks to MAX_PAYLOAD_SIZE so XOR works properly
+    // Pad chunks to MAX_PAYLOAD_SIZE with random bytes to maximize optical entropy
     const chunk = new Uint8Array(MAX_PAYLOAD_SIZE);
+    for (let i = 0; i < MAX_PAYLOAD_SIZE; i++) {
+      chunk[i] = Math.floor(Math.random() * 256);
+    }
     const slice = payloadBytes.slice(offset, offset + MAX_PAYLOAD_SIZE);
     chunk.set(slice);
     sourceChunks.push(chunk);
