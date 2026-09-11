@@ -325,6 +325,15 @@ function stopTransmission() {
 document.getElementById('btnPrepare').addEventListener('click', prepareSession);
 document.getElementById('btnStart').addEventListener('click', startBroadcast);
 document.getElementById('btnStop').addEventListener('click', stopTransmission);
+document.getElementById('btnFullscreen').addEventListener('click', () => {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(err => {
+      console.warn(`Error attempting to enable fullscreen: ${err.message}`);
+    });
+  } else {
+    document.exitFullscreen();
+  }
+});
 window.addEventListener('resize', () => {
   // Allow flex layout to calculate before grabbing clientWidth
   setTimeout(render, 50);

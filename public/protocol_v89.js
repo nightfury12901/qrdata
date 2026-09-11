@@ -26,14 +26,15 @@ const CHANNEL_BYTES = 684;          // FRAME_BYTES / 3
 const NUM_CHANNELS = 3;             // R, G, B
 const HEADER_SIZE = 5;              // seq(2) + length(2) + flags(1)
 const FOOTER_SIZE = 1;              // CRC-8
-const MAX_PAYLOAD_SIZE = FRAME_BYTES - HEADER_SIZE - FOOTER_SIZE; // 2046 bytes
 
-// Keep legacy constant names so sender.js / receiver.js don't need changes
-const TOTAL_DATA = FRAME_BYTES;
-const BLOCKS_PER_CHANNEL = 1;
-const BLOCK_SIZE = CHANNEL_BYTES;
-const ECC_SIZE = 0;
-const DATA_PER_BLOCK = CHANNEL_BYTES;
+// Reed-Solomon config: split each 684-byte channel into three 228-byte sub-blocks.
+const BLOCKS_PER_CHANNEL = 3;
+const BLOCK_SIZE = CHANNEL_BYTES / BLOCKS_PER_CHANNEL; // 228
+const ECC_SIZE = 32; // Parity bytes per block
+const DATA_PER_BLOCK = BLOCK_SIZE - ECC_SIZE; // 196
+const TOTAL_DATA = DATA_PER_BLOCK * BLOCKS_PER_CHANNEL * NUM_CHANNELS; // 1764
+
+const MAX_PAYLOAD_SIZE = TOTAL_DATA - HEADER_SIZE - FOOTER_SIZE; // 1758 bytes
 
 // Protocol Flags
 const FLAG_TEXT = 0;
@@ -52,7 +53,6 @@ function mulberry32(a) {
 }
 
 // Stateless integer hash function to generate deterministic PRBS mask for bit index `i`.
-// This guarantees sender/receiver remain perfectly synchronized regardless of framerate.
 function getMaskBit(i) {
   let h = (i + 0x12345678) | 0;
   h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
@@ -60,9 +60,6 @@ function getMaskBit(i) {
   return ((h ^ (h >>> 16)) >>> 31) & 1;
 }
 
-/**
- * Get the chunk indices to XOR for a given sequence number.
- */
 function getFountainIndices(seq, totalChunks) {
   if (seq < totalChunks) {
     return [seq];
@@ -78,19 +75,33 @@ function getFountainIndices(seq, totalChunks) {
   return indices;
 }
 
+let rsEncoder = null;
+let rsDecoder = null;
+
+function initRS() {
+  if (rsEncoder) return;
+  if (typeof RS !== 'undefined') {
+    const field = RS.GenericGF.QR_CODE_FIELD_256();
+    rsEncoder = new RS.ReedSolomonEncoder(field);
+    rsDecoder = new RS.ReedSolomonDecoder(field);
+  } else {
+    throw new Error("RS library not loaded");
+  }
+}
+
 /**
- * Encodes a frame into 3 raw byte channels [R, G, B] with CRC.
- * @returns {Uint8Array[]} [rChannel, gChannel, bChannel], each CHANNEL_BYTES bytes
+ * Encodes a frame into 3 raw byte channels [R, G, B] with CRC and RS.
  */
 function encodeFrame(seq, isEof, flags, payload) {
+  initRS();
   if (payload.length > MAX_PAYLOAD_SIZE) {
     throw new Error(`Payload too large: ${payload.length} > ${MAX_PAYLOAD_SIZE}`);
   }
 
-  const data = new Uint8Array(FRAME_BYTES);
+  const data = new Uint8Array(TOTAL_DATA);
 
   // Fill non-header area with random bytes for visual noise
-  for (let i = HEADER_SIZE; i < FRAME_BYTES - FOOTER_SIZE; i++) {
+  for (let i = HEADER_SIZE; i < TOTAL_DATA - FOOTER_SIZE; i++) {
     data[i] = Math.floor(Math.random() * 256);
   }
 
@@ -106,44 +117,81 @@ function encodeFrame(seq, isEof, flags, payload) {
   data.set(payload, HEADER_SIZE);
 
   // CRC covers everything except the last byte
-  data[FRAME_BYTES - 1] = crc8(data.subarray(0, FRAME_BYTES - 1));
+  data[TOTAL_DATA - 1] = crc8(data.subarray(0, TOTAL_DATA - 1));
 
-  // Split into 3 equal channels (row-major: R gets bytes 0..683, G gets 684..1367, B gets 1368..2051)
-  return [
-    new Uint8Array(data.buffer, 0, CHANNEL_BYTES),
-    new Uint8Array(data.buffer, CHANNEL_BYTES, CHANNEL_BYTES),
-    new Uint8Array(data.buffer, CHANNEL_BYTES * 2, CHANNEL_BYTES),
+  const blocks = [
+    new Uint8Array(CHANNEL_BYTES),
+    new Uint8Array(CHANNEL_BYTES),
+    new Uint8Array(CHANNEL_BYTES),
   ];
+
+  for (let ch = 0; ch < NUM_CHANNELS; ch++) {
+    for (let blk = 0; blk < BLOCKS_PER_CHANNEL; blk++) {
+      const rsData = new Int32Array(BLOCK_SIZE);
+      const dataOffset = (ch * BLOCKS_PER_CHANNEL + blk) * DATA_PER_BLOCK;
+      for (let i = 0; i < DATA_PER_BLOCK; i++) {
+        rsData[i] = data[dataOffset + i];
+      }
+      rsEncoder.encode(rsData, ECC_SIZE);
+      
+      const blockOffset = blk * BLOCK_SIZE;
+      for (let i = 0; i < BLOCK_SIZE; i++) {
+        blocks[ch][blockOffset + i] = rsData[i];
+      }
+    }
+  }
+
+  return blocks;
 }
 
 /**
  * Decodes a frame from 3 raw byte channels.
- * @returns {{ valid, seq, isEof, flags, payload, errorsCorrected, failedChannel }}
  */
 function decodeFrame(rBlock, gBlock, bBlock) {
-  const data = new Uint8Array(FRAME_BYTES);
-  data.set(rBlock.subarray(0, CHANNEL_BYTES), 0);
-  data.set(gBlock.subarray(0, CHANNEL_BYTES), CHANNEL_BYTES);
-  data.set(bBlock.subarray(0, CHANNEL_BYTES), CHANNEL_BYTES * 2);
+  initRS();
+  const blocks = [rBlock, gBlock, bBlock];
+  const decoded = new Uint8Array(TOTAL_DATA);
+  let totalErrors = 0;
+
+  for (let ch = 0; ch < NUM_CHANNELS; ch++) {
+    for (let blk = 0; blk < BLOCKS_PER_CHANNEL; blk++) {
+      const rsData = new Int32Array(BLOCK_SIZE);
+      const blockOffset = blk * BLOCK_SIZE;
+      for (let i = 0; i < BLOCK_SIZE; i++) {
+        rsData[i] = blocks[ch][blockOffset + i];
+      }
+
+      try {
+        totalErrors += rsDecoder.decode(rsData, ECC_SIZE);
+      } catch (e) {
+        return { valid: false, errorsCorrected: 0, failedChannel: ch };
+      }
+
+      const dataOffset = (ch * BLOCKS_PER_CHANNEL + blk) * DATA_PER_BLOCK;
+      for (let i = 0; i < DATA_PER_BLOCK; i++) {
+        decoded[dataOffset + i] = rsData[i];
+      }
+    }
+  }
 
   // CRC check
-  const calculatedCrc = crc8(data.subarray(0, FRAME_BYTES - 1));
-  if (calculatedCrc !== data[FRAME_BYTES - 1]) {
-    return { valid: false, errorsCorrected: 0, failedChannel: -1 };
+  const calculatedCrc = crc8(decoded.subarray(0, TOTAL_DATA - 1));
+  if (calculatedCrc !== decoded[TOTAL_DATA - 1]) {
+    return { valid: false, errorsCorrected: totalErrors, failedChannel: -1 };
   }
 
   // Extract header
-  const seqWithEof = data[0] | (data[1] << 8);
+  const seqWithEof = decoded[0] | (decoded[1] << 8);
   const seq = seqWithEof & 0x7FFF;
   const isEof = (seqWithEof & 0x8000) !== 0;
-  const length = data[2] | (data[3] << 8);
-  const flags = data[4];
+  const length = decoded[2] | (decoded[3] << 8);
+  const flags = decoded[4];
 
   if (length > MAX_PAYLOAD_SIZE) {
-    return { valid: false, errorsCorrected: 0 };
+    return { valid: false, errorsCorrected: totalErrors };
   }
 
-  const payload = new Uint8Array(data.subarray(HEADER_SIZE, HEADER_SIZE + length));
+  const payload = new Uint8Array(decoded.subarray(HEADER_SIZE, HEADER_SIZE + length));
 
   return {
     valid: true,
@@ -151,6 +199,6 @@ function decodeFrame(rBlock, gBlock, bBlock) {
     isEof,
     flags,
     payload,
-    errorsCorrected: 0
+    errorsCorrected: totalErrors
   };
 }
