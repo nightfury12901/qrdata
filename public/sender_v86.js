@@ -103,6 +103,8 @@ function loadBlocksToPattern(blocks) {
   patternR[2] = 0; patternG[2] = 3; patternB[2] = 0;
   patternR[3] = 0; patternG[3] = 0; patternB[3] = 3;
 
+  const prng = mulberry32(0x12345678);
+
   for (let i = 0; i < 5472; i++) {
     const cellIdx = i + 4; // Skip the 4 calibration cells
     const row = Math.floor(cellIdx / GRID_SIZE);
@@ -111,8 +113,8 @@ function loadBlocksToPattern(blocks) {
     const byteIdx = Math.floor(i / 8);
     const shift = 7 - (i % 8); // extracts 1 bit at a time from MSB to LSB
     
-    // PRBS mask guarantees 50/50 balance preventing threshold collapse
-    const mask = (i * 211 + 17) % 2;
+    // Proper PRNG prevents subpixel optical aliasing that destroyed the previous high-frequency mask
+    const mask = prng() > 0.5 ? 1 : 0;
     
     patternR[cellIdx] = (((rBlock[byteIdx] >> shift) & 1) ^ mask) * 3;
     patternG[cellIdx] = (((gBlock[byteIdx] >> shift) & 1) ^ mask) * 3;
