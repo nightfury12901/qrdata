@@ -74,6 +74,7 @@ if (btnReset) {
     reassemblyComplete = false;
     currentFileToDownload = null;
     maxSeqReceived = -1;
+    crcFailCount = 0;
     statMessage.value = 'Waiting for frames...';
     
     const statProgressText = document.getElementById('statProgressText');
@@ -181,6 +182,10 @@ let reassemblyComplete = false;
 let currentFileToDownload = null;
 let maxSeqReceived = -1;
 
+// CRC status debounce — only flip to "CRC failed" after N consecutive failures
+let crcFailCount = 0;
+const CRC_FAIL_DEBOUNCE = 5; // frames
+
 // ---- Audio NACK / ACK ----
 let audioCtx = null;
 let nackOsc = null;
@@ -240,6 +245,42 @@ let procCanvas = null;
 let procCtx = null;
 let procW = 0, procH = 0;
 let nativeW = 0, nativeH = 0;
+
+// ---- Media preview after reassembly ----
+function showMediaPreview(file) {
+  const container = document.getElementById('filePreviewContainer');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const type = file.type || '';
+  const url = URL.createObjectURL(file);
+
+  if (type.startsWith('video/')) {
+    const vid = document.createElement('video');
+    vid.src = url;
+    vid.controls = true;
+    vid.autoplay = false;
+    vid.style.cssText = 'max-width:100%; border:2px solid #39f; border-radius:8px; margin-top:8px;';
+    container.appendChild(vid);
+  } else if (type.startsWith('audio/')) {
+    const aud = document.createElement('audio');
+    aud.src = url;
+    aud.controls = true;
+    aud.style.cssText = 'width:100%; margin-top:8px;';
+    container.appendChild(aud);
+  } else if (type.startsWith('image/')) {
+    const img = document.createElement('img');
+    img.src = url;
+    img.style.cssText = 'max-width:100%; border:2px solid #39f; border-radius:8px; margin-top:8px;';
+    img.alt = file.name;
+    container.appendChild(img);
+    const hint = document.createElement('div');
+    hint.textContent = 'Long-press image to save on iOS';
+    hint.style.cssText = 'font-size:11px; color:#aaa; margin-top:4px;';
+    container.appendChild(hint);
+  }
+  // For other types (PDF, ZIP, etc.) just show nothing — download button is enough
+}
 
 // ---- Camera setup ----
 
@@ -441,6 +482,7 @@ function decodeLoop() {
       stats.successFrames++; // Grid detected successfully
 
       if (frame.valid) {
+        crcFailCount = 0; // reset debounce on any good frame
         if (stats.validFrames === 0) firstValidFrameTime = performance.now();
         stats.validFrames++;
         stats.totalErrorsCorrected += frame.errorsCorrected;
@@ -530,6 +572,27 @@ function decodeLoop() {
             currentFileToDownload = new File([exactData], fileMeta.name, { type: fileMeta.type || 'application/octet-stream' });
             statMessage.value = `[File Transfer Complete]\nName: ${fileMeta.name}\nSize: ${(fileMeta.size / 1024).toFixed(1)} KB`;
             
+            // Auto-unzip if the received file is a ZIP containing the original file
+            if (fileMeta.name.toLowerCase().endsWith('.zip') && typeof fflate !== 'undefined') {
+              try {
+                const unzipped = fflate.unzipSync(exactData);
+                const innerNames = Object.keys(unzipped);
+                if (innerNames.length > 0) {
+                  const innerName = fileMeta.originalName || innerNames[0];
+                  const innerType = fileMeta.originalType || 'application/octet-stream';
+                  const innerBytes = unzipped[innerNames[0]];
+                  currentFileToDownload = new File([innerBytes], innerName, { type: innerType });
+                  statMessage.value = `[File Transfer Complete]\nName: ${innerName}\nSize: ${(innerBytes.length / 1024).toFixed(1)} KB (unzipped from ZIP)`;
+                  showMediaPreview(currentFileToDownload);
+                }
+              } catch (zipErr) {
+                console.warn('ZIP extraction failed, offering raw ZIP:', zipErr);
+                showMediaPreview(currentFileToDownload);
+              }
+            } else {
+              showMediaPreview(currentFileToDownload);
+            }
+            
             const btnDownload = document.getElementById('btnDownload');
             if (btnDownload) {
               btnDownload.style.display = 'block';
@@ -540,11 +603,15 @@ function decodeLoop() {
         }
         decoded = true;
       } else {
-        // Dump min/max per channel to diagnose actual optical contrast
-        const contrastStr = `R:${minR.toFixed(0)}-${maxR.toFixed(0)} G:${minG.toFixed(0)}-${maxG.toFixed(0)} B:${minB.toFixed(0)}-${maxB.toFixed(0)}`;
-        const hex = Array.from(rBlock.subarray(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-        statStatus.textContent = `CRC Fail | ${contrastStr} | tR=${threshR[0].toFixed(0)} | ${hex}`;
-        statStatus.style.color = '#ff4444';
+        // CRC failed — only update status after several consecutive failures
+        // to avoid flickering from mid-transition camera captures
+        crcFailCount++;
+        if (crcFailCount >= CRC_FAIL_DEBOUNCE) {
+          const contrastStr = `R:${minR.toFixed(0)}-${maxR.toFixed(0)} G:${minG.toFixed(0)}-${maxG.toFixed(0)} B:${minB.toFixed(0)}-${maxB.toFixed(0)}`;
+          const hex = Array.from(rBlock.subarray(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+          statStatus.textContent = `CRC Fail (${crcFailCount}) | ${contrastStr} | tR=${threshR[0].toFixed(0)} | ${hex}`;
+          statStatus.style.color = '#ff4444';
+        }
       }
 
       stats.lastAnchors = anchors;

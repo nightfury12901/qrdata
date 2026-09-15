@@ -25,10 +25,16 @@ const patternR = new Uint8Array(GRID_SIZE * GRID_SIZE);
 const patternG = new Uint8Array(GRID_SIZE * GRID_SIZE);
 const patternB = new Uint8Array(GRID_SIZE * GRID_SIZE);
 
-let txInterval = null;
+let txRafId = null;          // requestAnimationFrame handle (replaces setInterval)
 let sourceChunks = [];
 let metadataFrameBlocks = null;
 let fountainSeq = 0;
+
+// rAF frame pacing state
+let txSpeedMs = 66;          // ms per data frame (set at startBroadcast)
+let txLastFrameTime = 0;     // timestamp of last rendered frame
+let txTickCount = 0;
+let txNackFountainSeq = 0;
 
 // Audio NACK/ACK state
 let audioCtx = null;
@@ -205,15 +211,40 @@ async function prepareSession() {
   };
 
   if (file) {
-    if (file.size > 1024 * 1024) {
-      alert("File is too large (max 1MB)");
-      return;
-    }
-    metaObj.name = file.name;
-    metaObj.size = file.size;
-    metaObj.type = file.type;
     const arrayBuffer = await file.arrayBuffer();
-    payloadBytes = new Uint8Array(arrayBuffer);
+    const rawBytes = new Uint8Array(arrayBuffer);
+    const statusEl = document.getElementById('txStatus');
+
+    const ZIP_THRESHOLD = 1024 * 1024; // 1 MB
+    if (file.size > ZIP_THRESHOLD && !file.name.toLowerCase().endsWith('.zip')) {
+      // Auto-ZIP: compress large files (>1MB) to reduce chunk count & transfer time.
+      // fflate is loaded via <script> in sender.html
+      statusEl.textContent = 'Compressing...';
+      const zipName = file.name + '.zip';
+      const compressed = await new Promise((resolve, reject) => {
+        const fileMap = {};
+        fileMap[file.name] = rawBytes;
+        fflate.zip(fileMap, { level: 6 }, (err, data) => {
+          if (err) reject(err);
+          else resolve(data);
+        });
+      });
+      const ratio = ((1 - compressed.length / rawBytes.length) * 100).toFixed(1);
+      statusEl.textContent = `Compressed: ${(rawBytes.length/1024).toFixed(1)} KB → ${(compressed.length/1024).toFixed(1)} KB (${ratio}% smaller)`;
+
+      payloadBytes = compressed;
+      metaObj.name = zipName;
+      metaObj.size = compressed.length;
+      metaObj.type = 'application/zip';
+      metaObj.originalName = file.name;
+      metaObj.originalType = file.type;
+    } else {
+      // Small files (≤1MB) or already-zipped files: send raw
+      payloadBytes = rawBytes;
+      metaObj.name = file.name;
+      metaObj.size = file.size;
+      metaObj.type = file.type;
+    }
   } else {
     payloadBytes = new TextEncoder().encode(text);
     metaObj.size = payloadBytes.length;
@@ -248,7 +279,9 @@ async function prepareSession() {
   document.getElementById('msgInput').disabled = true;
   document.getElementById('fileInput').disabled = true;
   document.getElementById('txStatus').textContent = 'Handshake Ready';
-  document.getElementById('txChunks').textContent = `${sourceChunks.length} chunks`;
+  const estSec = Math.ceil(sourceChunks.length * 1.4 * txSpeedMs / 1000);
+  document.getElementById('txChunks').textContent = `${sourceChunks.length} chunks (~${estSec}s est.)`;
+  document.getElementById('txStatus').className = 'value';
 }
 
 function startBroadcast() {
@@ -259,15 +292,29 @@ function startBroadcast() {
 
   initAudioListener();
 
-  const speedMs = parseInt(document.getElementById('speedSlider').value);
-  fountainSeq = 0; // start fountain seq at 0 for systematic transmission
-  let nackFountainSeq = sourceChunks.length; // start sending fountain packets from here if NACKed
-  let tickCount = 0;
+  txSpeedMs = parseInt(document.getElementById('speedSlider').value);
+  fountainSeq = 0;
+  txNackFountainSeq = sourceChunks.length;
+  txTickCount = 0;
+  txLastFrameTime = 0;
 
-  txInterval = setInterval(() => {
-    tickCount++;
-    // Interleave the handshake frame every 16 ticks so the receiver can join anytime
-    if (tickCount % 16 === 1) {
+  // ---- rAF-based frame loop (vsync-aligned) ----
+  // Replacing setInterval: setInterval fires off-beat from the monitor refresh,
+  // causing the camera to capture partial canvas updates → CRC failures.
+  // requestAnimationFrame fires at vsync so the canvas update and screen repaint
+  // are atomic from the camera's perspective.
+  function txLoop(now) {
+    txRafId = requestAnimationFrame(txLoop);
+
+    const elapsed = now - txLastFrameTime;
+    if (elapsed < txSpeedMs) return; // Not time yet — hold current frame on screen
+
+    // Snap to grid: prevents drift accumulation
+    txLastFrameTime = now - (elapsed % txSpeedMs);
+    txTickCount++;
+
+    // Interleave the handshake frame every 16 ticks so receiver can join anytime
+    if (txTickCount % 16 === 1) {
       loadBlocksToPattern(metadataFrameBlocks);
       render();
       document.getElementById('txFrame').textContent = `Frame: Handshake`;
@@ -276,7 +323,7 @@ function startBroadcast() {
 
     let currentSeq;
     if (isNackActive) {
-      currentSeq = nackFountainSeq++;
+      currentSeq = txNackFountainSeq++;
       document.getElementById('txStatus').textContent = 'Broadcasting (Auto-Healing)...';
       document.getElementById('txStatus').className = 'value warn';
     } else {
@@ -287,7 +334,7 @@ function startBroadcast() {
 
     // 1. Get indices for this sequence number
     const indices = getFountainIndices(currentSeq, sourceChunks.length);
-    
+
     // 2. XOR the selected chunks together
     const xorPayload = new Uint8Array(MAX_PAYLOAD_SIZE);
     for (const idx of indices) {
@@ -295,20 +342,22 @@ function startBroadcast() {
         xorPayload[i] ^= sourceChunks[idx][i];
       }
     }
-    
+
     // 3. Encode the frame and load to pattern
     const blocks = encodeFrame(currentSeq, false, FLAG_FOUNTAIN_DATA, xorPayload);
     loadBlocksToPattern(blocks);
     render();
 
     document.getElementById('txFrame').textContent = `Frame: ${currentSeq}`;
-  }, speedMs);
+  }
+
+  txRafId = requestAnimationFrame(txLoop);
 }
 
 function stopTransmission() {
-  if (txInterval) {
-    clearInterval(txInterval);
-    txInterval = null;
+  if (txRafId) {
+    cancelAnimationFrame(txRafId);
+    txRafId = null;
   }
   document.getElementById('btnPrepare').disabled = false;
   document.getElementById('btnStart').disabled = true;

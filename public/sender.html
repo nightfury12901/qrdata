@@ -4,14 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Photon — Sender v86</title>
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body class="sender-page">
   <div class="sender-controls">
     <div style="display:flex; flex-direction:column; gap:8px;">
       <textarea id="msgInput" placeholder="Enter message to send..." rows="4" style="width:100%; background:#1a1a2e; color:#0f0; border:1px solid #333; padding:8px; font-family:monospace; border-radius:4px; resize:none;"></textarea>
       <div style="display:flex; flex-direction:column; gap:4px;">
-        <label style="font-size:12px; color:#aaa;">Or send a file (max 1MB):</label>
+        <label style="font-size:12px; color:#aaa;">Or send a file (auto-zipped if &gt;1MB):</label>
         <input type="file" id="fileInput" style="font-size:12px; width: 100%;" />
       </div>
     </div>
@@ -37,7 +37,8 @@
   <div id="canvasContainer">
     <canvas id="gridCanvas"></canvas>
   </div>
-  <div style="position:absolute; top:10px; right:10px; color:#fff; font-family:monospace; font-size:12px; background:#222; padding:4px 8px; border-radius:4px; z-index:100;">v89</div>
+  <div style="position:absolute; top:10px; right:10px; color:#fff; font-family:monospace; font-size:12px; background:#222; padding:4px 8px; border-radius:4px; z-index:100;">v90</div>
+  <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
   <script src="reedsolomon.js"></script>
   <script src="protocol_v89.js"></script>
   <script src="sender_v89.js"></script>
